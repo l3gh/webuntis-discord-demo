@@ -200,6 +200,50 @@ def homework_description(item, names):
     return f"Homework · {subject} · due {due} ({status})\nAssigned {assigned}" + (f" · {teacher}" if teacher else "") + f"\n{detail}"
 
 
+def homework_embeds(items, names, label, start, end):
+    """Build mobile-friendly pages without dropping long assignments."""
+    sections = []
+    for item in items:
+        subject = discord.utils.escape_markdown(str(homework_subject(item, names)))
+        due = untis.date_label(item.get("dueDate")) or "date unknown"
+        assigned = untis.date_label(item.get("date"))
+        teacher_id = item.get("_teacher_id")
+        teacher = names.get("te", {}).get(str(teacher_id), "") if teacher_id is not None else ""
+        metadata = " · ".join(part for part in (
+            f"Assigned {assigned}" if assigned else "",
+            discord.utils.escape_markdown(str(teacher)) if teacher else "",
+            "Completed" if item.get("completed") else "Not completed",
+        ) if part)
+        detail = str(item.get("text") or "No assignment text provided.").strip()
+        section = f"**{subject}** · due **{due}**\n"
+        if metadata:
+            section += f"-# {metadata}\n"
+        sections.extend(split_message(section + detail, limit=3500))
+
+    pages, current = [], ""
+    for section in sections:
+        if current and len(current) + len(section) + 2 > 3500:
+            pages.append(current)
+            current = ""
+        current = f"{current}\n\n{section}" if current else section
+    if current:
+        pages.append(current)
+    if not pages:
+        pages = ["No matching homework in this range."]
+
+    date_range = f"{untis.date_label(untis.normal_date(start))} – {untis.date_label(untis.normal_date(end))}"
+    count = f"{len(items)} assignment{'s' if len(items) != 1 else ''}"
+    embeds = []
+    for index, page in enumerate(pages):
+        embed = discord.Embed(title=f"{label[:230]} homework", description=page, color=0xFF6033)
+        footer = f"{date_range} · {count}"
+        if len(pages) > 1:
+            footer += f" · {index + 1}/{len(pages)}"
+        embed.set_footer(text=footer)
+        embeds.append(embed)
+    return embeds
+
+
 def exam_description(item, names=None):
     exam_day = untis.date_label(item.get("examDate") or item.get("date")) or "date unknown"
     start = untis.time_label(item.get("startTime"))
@@ -339,12 +383,8 @@ class UntisDiscordBot(commands.Bot):
             matches = [item for item in homework if homework_matches_class(item, class_name, names)]
             matches.sort(key=lambda item: str(item.get("dueDate", "")))
             label = "All subjects" if class_name.casefold() == "all" else (homework_subject(matches[0], names) if matches else class_name.title())
-            header = (f"**{label} homework** · due dates {untis.date_label(untis.normal_date(start))}"
-                      f" – {untis.date_label(untis.normal_date(end))} · {len(matches)} item(s)")
-            body = "\n\n".join(f"• {homework_description(item, names)}" for item in matches)
-            response = header + (f"\n\n{body}" if body else "\nNo matching homework in this range.")
-            for chunk in split_message(response):
-                await message.channel.send(chunk, allowed_mentions=discord.AllowedMentions.none())
+            for embed in homework_embeds(matches, names, label, start, end):
+                await message.channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
         except Exception as exc:
             await message.channel.send(
                 f"Could not load WebUntis homework: {str(exc)[:1000]}",

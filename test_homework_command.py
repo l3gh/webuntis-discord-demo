@@ -25,6 +25,33 @@ class HomeworkHelpTests(unittest.IsolatedAsyncioTestCase):
 
 
 class HomeworkCommandTests(unittest.TestCase):
+    def test_embed_shows_assignment_details_and_status(self):
+        items = [{"subject": "Maths", "dueDate": "20261106", "date": "20261103",
+                  "_teacher_id": 1, "text": "Exercises 110a-f", "completed": False},
+                 {"subject": "French", "dueDate": "20261110", "text": "Read page 63", "completed": True}]
+        embeds = bot.homework_embeds(items, {"te": {"1": "Kaller"}}, "All subjects", date(2026, 11, 5), date(2026, 12, 3))
+        self.assertEqual(len(embeds), 1)
+        self.assertIn("**Maths** · due **06.11.2026**", embeds[0].description)
+        self.assertIn("Assigned 03.11.2026 · Kaller", embeds[0].description)
+        self.assertIn("**French**", embeds[0].description)
+        self.assertIn("Not completed", embeds[0].description)
+        self.assertIn("-# Completed", embeds[0].description)
+        self.assertEqual(embeds[0].colour.value, 0xFF6033)
+        self.assertIn("Exercises 110a-f", embeds[0].description)
+        self.assertIn("2 assignments", embeds[0].footer.text)
+
+    def test_long_homework_is_paginated_without_losing_text(self):
+        detail = "x" * 8000
+        embeds = bot.homework_embeds([{"text": detail}], {}, "All subjects", date(2026, 11, 5), date(2026, 12, 3))
+        self.assertGreater(len(embeds), 1)
+        self.assertTrue(all(len(embed.description) <= 3500 for embed in embeds))
+        self.assertEqual(sum(embed.description.count("x") for embed in embeds), len(detail))
+
+    def test_empty_results(self):
+        embeds = bot.homework_embeds([], {}, "All subjects", date(2026, 11, 5), date(2026, 12, 3))
+        self.assertEqual(embeds[0].description, "No matching homework in this range.")
+        self.assertIn("0 assignments", embeds[0].footer.text)
+
     def test_defaults_and_options(self):
         self.assertEqual(bot.parse_homework_options([]), ("all", 4, False, True))
         self.assertEqual(bot.parse_homework_options(["class:maths", "time:2", "past:false"]), ("maths", 2, False, True))
