@@ -15,3 +15,6 @@ display_names.json
 *.zip
 
 webuntis-watcher.service
+
+# Local image assets
+*.png
