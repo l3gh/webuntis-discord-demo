@@ -267,7 +267,8 @@ class UntisDiscordBot(commands.Bot):
         intents.guild_messages = True
         intents.message_content = True
         super().__init__(command_prefix=commands.when_mentioned, intents=intents,
-                         allowed_mentions=discord.AllowedMentions.none())
+                         allowed_mentions=discord.AllowedMentions.none(),
+                         activity=discord.Game(name="Restarted"))
         self.alert_channel_id = None
         try:
             self.alert_channel_id = json.loads(CHANNEL_STATE.read_text("utf-8")).get("channel_id")
@@ -339,7 +340,6 @@ class UntisDiscordBot(commands.Bot):
             )
 
     async def show_restart_presence(self):
-        await self.change_presence(activity=discord.Game(name="Restarted"))
         await asyncio.sleep(5)
         await self.change_presence(activity=discord.Activity(
             type=discord.ActivityType.watching, name="WebUntis"
@@ -683,7 +683,9 @@ async def restart_command(interaction: discord.Interaction):
         return
 
     await interaction.response.send_message("Restarting the bot now.", ephemeral=True)
+    await bot.change_presence(activity=discord.Game(name="Restarting.."))
     await asyncio.sleep(1)
+    await bot.close()
     os.execv(sys.executable, [sys.executable, *sys.argv])
 
 
