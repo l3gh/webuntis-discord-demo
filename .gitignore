@@ -1,0 +1,17 @@
+.env
+.env.*
+!.env.example
+.venv/
+__pycache__/
+*.py[cod]
+state.json
+legacy_state.json
+plan_state.json
+reminder_state.json
+watcher_status.json
+discord_channel.json
+display_names.json
+*.before-*
+*.zip
+
+webuntis-watcher.service
