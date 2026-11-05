@@ -315,7 +315,8 @@ class UntisDiscordBot(commands.Bot):
 
         if len(tokens) == 2 and tokens[1].casefold() == "help":
             embed = discord.Embed(description=(
-                f"`.hw class:all time:{HW_COMMAND_DEFAULT_WEEKS} past:false future:true`\n"
+                "Defaults:\n"
+                f"`.hw class:all time:{HW_COMMAND_DEFAULT_WEEKS} past:false future:true`\n\n"
                 "`class:` Filter by subject; `all` includes every subject.\n"
                 f"`time:` Window in weeks (1–{HW_COMMAND_MAX_WEEKS}); `range:` also works.\n"
                 "`past:` Include past dates; `future:` include future dates. "
