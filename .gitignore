@@ -16,5 +16,5 @@ display_names.json
 
 webuntis-watcher.service
 
-# Local image assets
-*.png
+# Local icon assets
+*.ico
