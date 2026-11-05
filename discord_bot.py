@@ -31,7 +31,8 @@ FAST_POLL_SECONDS = 300
 LOOKAHEAD_DAYS = 21
 TIMETABLE_LOOKAHEAD_DAYS = 35
 NORMAL_CHECK_DAYS = 21
-HW_COMMAND_MAX_MONTHS = 12
+HW_COMMAND_DEFAULT_WEEKS = 4
+HW_COMMAND_MAX_WEEKS = 52
 BOT_OWNER_ID = 976444034266583041
 SCHOOL_TZ = ZoneInfo("Europe/Vienna")
 
@@ -107,14 +108,42 @@ def fetch_snapshot(full=False):
     }
 
 
-def fetch_homework_range(months):
+def fetch_homework_range(weeks, past=True, future=True):
     prefix, endpoint, opener, _auth = webuntis_connection()
     today = datetime.now(SCHOOL_TZ).date()
-    start, end = add_months(today, -months), add_months(today, months)
+    start = today - timedelta(weeks=weeks) if past else today
+    end = today + timedelta(weeks=weeks) if future else today
     homework, _ = untis.fetch_plan_markers(prefix, start, end, opener)
     names = untis.load_entity_names(opener, endpoint)
     homework = [item for item in homework if item_in_window(item, "dueDate", start, end)]
     return today, start, end, homework, names
+
+
+def parse_homework_options(tokens):
+    options = {}
+    for token in tokens:
+        key, separator, value = token.partition(":")
+        key = key.casefold()
+        if not separator or key not in ("class", "time", "range", "past", "future") or not value or key in options:
+            raise ValueError("Invalid option.")
+        options[key] = value
+    if "time" in options and "range" in options:
+        raise ValueError("Use time only once.")
+    try:
+        weeks = int(options.get("time", options.get("range", str(HW_COMMAND_DEFAULT_WEEKS))))
+    except ValueError:
+        raise ValueError("Time must be a whole number of weeks.") from None
+    if not 1 <= weeks <= HW_COMMAND_MAX_WEEKS:
+        raise ValueError(f"Time must be 1–{HW_COMMAND_MAX_WEEKS} weeks.")
+    flags = {}
+    for key in ("past", "future"):
+        value = options.get(key, "true").casefold()
+        if value not in ("true", "false"):
+            raise ValueError(f"{key} must be true or false.")
+        flags[key] = value == "true"
+    if not any(flags.values()):
+        raise ValueError("Past and future cannot both be false.")
+    return options.get("class", "all"), weeks, flags["past"], flags["future"]
 
 def stable_items(items):
     result = {}
@@ -283,27 +312,17 @@ class UntisDiscordBot(commands.Bot):
         if not tokens or tokens[0].casefold() != ".hw":
             return
 
-        options = {}
-        for token in tokens[1:]:
-            key, separator, value = token.partition(":")
-            if not separator or key.casefold() not in ("class", "range"):
-                await message.channel.send("Usage: `.hw class:french range:1` or `.hw class:all range:1`", allowed_mentions=discord.AllowedMentions.none())
-                return
-            options[key.casefold()] = value.strip().strip('"\'')
-        class_name = options.get("class", "")
         try:
-            months = int(options.get("range", ""))
-        except ValueError:
-            months = 0
-        if not class_name or not 1 <= months <= HW_COMMAND_MAX_MONTHS:
+            class_name, weeks, past, future = parse_homework_options(tokens[1:])
+        except ValueError as exc:
             await message.channel.send(
-                f"Usage: `.hw class:french range:1` or `.hw class:all range:1` (range must be 1–{HW_COMMAND_MAX_MONTHS} months).",
+                f"{exc} Usage: `.hw class:maths time:4 past:false` (time in weeks).",
                 allowed_mentions=discord.AllowedMentions.none(),
             )
             return
 
         try:
-            today, start, end, homework, names = await asyncio.to_thread(fetch_homework_range, months)
+            today, start, end, homework, names = await asyncio.to_thread(fetch_homework_range, weeks, past, future)
             matches = [item for item in homework if homework_matches_class(item, class_name, names)]
             matches.sort(key=lambda item: str(item.get("dueDate", "")))
             label = "All subjects" if class_name.casefold() == "all" else (homework_subject(matches[0], names) if matches else class_name.title())
