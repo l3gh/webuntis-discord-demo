@@ -313,6 +313,17 @@ class UntisDiscordBot(commands.Bot):
         if not tokens or tokens[0].casefold() != ".hw":
             return
 
+        if len(tokens) == 2 and tokens[1].casefold() == "help":
+            embed = discord.Embed(description=(
+                f"`.hw class:all time:{HW_COMMAND_DEFAULT_WEEKS} past:false future:true`\n"
+                "`class:` Filter by subject; `all` includes every subject.\n"
+                f"`time:` Window in weeks (1–{HW_COMMAND_MAX_WEEKS}); `range:` also works.\n"
+                "`past:` Include past dates; `future:` include future dates. "
+                "Today is always included; at least one must be true."
+            ))
+            await message.channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+            return
+
         try:
             class_name, weeks, past, future = parse_homework_options(tokens[1:])
         except ValueError as exc:

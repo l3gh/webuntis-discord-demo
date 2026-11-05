@@ -1,8 +1,22 @@
 import unittest
 from datetime import date, datetime
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 import discord_bot as bot
+
+
+class HomeworkHelpTests(unittest.IsolatedAsyncioTestCase):
+    async def test_help_sends_public_embed_without_fetching(self):
+        message = SimpleNamespace(author=SimpleNamespace(bot=False), guild=object(), content=".hw help", channel=SimpleNamespace(send=AsyncMock()))
+        with patch.object(bot, "fetch_homework_range") as fetch:
+            await bot.UntisDiscordBot.on_message(None, message)
+        fetch.assert_not_called()
+        message.channel.send.assert_awaited_once()
+        kwargs = message.channel.send.await_args.kwargs
+        self.assertNotIn("ephemeral", kwargs)
+        self.assertIsNone(kwargs["embed"].title)
+        self.assertTrue(kwargs["embed"].description.startswith("`.hw class:all time:4 past:false future:true`"))
 
 
 class HomeworkCommandTests(unittest.TestCase):
