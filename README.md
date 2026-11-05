@@ -32,7 +32,7 @@ To use the Discord bot, add `DISCORD_BOT_TOKEN="..."` to `.env`, invite the bot 
 
 Optionally copy `display_names.example.json` to `display_names.json` and add subject, teacher or room labels. Keep mappings private if they identify people.
 
-The `.hw` message command defaults to all subjects, with due dates up to four weeks before and after today. Use `time:` to change the window in weeks (1–52), `class:` to filter a subject, `past:false` for today and future dates, or `future:false` for past dates and today. For example: `.hw class:maths time:2 past:false`. Both directions default to true; at least one must remain enabled. The older `range:` option is also accepted, in weeks.
+The `.hw` message command defaults to all subjects, with due dates from today through the next four weeks. Use `time:` to change the window in weeks (1–52), `class:` to filter a subject, and `past:true` to include past dates. Add `future:false` with `past:true` for past dates and today only. For example: `.hw class:maths time:2 past:true future:false`. At least one direction must be enabled. The older `range:` option is also accepted, in weeks.
 
 ## Limitations and privacy
 

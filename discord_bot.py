@@ -137,7 +137,7 @@ def parse_homework_options(tokens):
         raise ValueError(f"Time must be 1–{HW_COMMAND_MAX_WEEKS} weeks.")
     flags = {}
     for key in ("past", "future"):
-        value = options.get(key, "true").casefold()
+        value = options.get(key, "false" if key == "past" else "true").casefold()
         if value not in ("true", "false"):
             raise ValueError(f"{key} must be true or false.")
         flags[key] = value == "true"
@@ -317,7 +317,7 @@ class UntisDiscordBot(commands.Bot):
             class_name, weeks, past, future = parse_homework_options(tokens[1:])
         except ValueError as exc:
             await message.channel.send(
-                f"{exc} Usage: `.hw class:maths time:4 past:false` (time in weeks).",
+                f"{exc} Usage: `.hw class:maths time:4 past:true` (time in weeks).",
                 allowed_mentions=discord.AllowedMentions.none(),
             )
             return

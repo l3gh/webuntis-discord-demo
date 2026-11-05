@@ -7,12 +7,13 @@ import discord_bot as bot
 
 class HomeworkCommandTests(unittest.TestCase):
     def test_defaults_and_options(self):
-        self.assertEqual(bot.parse_homework_options([]), ("all", 4, True, True))
+        self.assertEqual(bot.parse_homework_options([]), ("all", 4, False, True))
         self.assertEqual(bot.parse_homework_options(["class:maths", "time:2", "past:false"]), ("maths", 2, False, True))
-        self.assertEqual(bot.parse_homework_options(["future:false", "range:3"]), ("all", 3, True, False))
+        self.assertEqual(bot.parse_homework_options(["past:true"]), ("all", 4, True, True))
+        self.assertEqual(bot.parse_homework_options(["past:true", "future:false", "range:3"]), ("all", 3, True, False))
 
     def test_invalid_options(self):
-        for tokens in (["time:0"], ["time:53"], ["time:no"], ["past:no"], ["past:false", "future:false"], ["class:"], ["time:1", "range:1"], ["unknown:1"]):
+        for tokens in (["time:0"], ["time:53"], ["time:no"], ["past:no"], ["past:false", "future:false"], ["future:false"], ["class:"], ["time:1", "range:1"], ["unknown:1"]):
             with self.subTest(tokens=tokens), self.assertRaises(ValueError):
                 bot.parse_homework_options(tokens)
 
