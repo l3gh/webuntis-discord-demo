@@ -35,6 +35,7 @@ HW_COMMAND_DEFAULT_WEEKS = 4
 HW_COMMAND_MAX_WEEKS = 52
 BOT_OWNER_ID = 976444034266583041
 SCHOOL_TZ = ZoneInfo("Europe/Vienna")
+FAVICON_COLOR = 0xFF6033
 
 
 def add_months(day, months):
@@ -235,7 +236,7 @@ def homework_embeds(items, names, label, start, end):
     count = f"{len(items)} assignment{'s' if len(items) != 1 else ''}"
     embeds = []
     for index, page in enumerate(pages):
-        embed = discord.Embed(title=f"{label[:230]} homework", description=page, color=0xFF6033)
+        embed = discord.Embed(title=f"{label[:230]} homework", description=page, color=FAVICON_COLOR)
         footer = f"{date_range} · {count}"
         if len(pages) > 1:
             footer += f" · {index + 1}/{len(pages)}"
@@ -365,7 +366,7 @@ class UntisDiscordBot(commands.Bot):
                 f"`time:` Window in weeks (1–{HW_COMMAND_MAX_WEEKS}); `range:` also works.\n"
                 "`past:` Include past dates; `future:` include future dates. "
                 "Today is always included; at least one must be true."
-            ))
+            ), color=FAVICON_COLOR)
             await message.channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
             return
 
@@ -631,6 +632,13 @@ bot = UntisDiscordBot()
 async def command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
     print(f"Slash command failed: {error}", file=sys.stderr)
     message = f"That command failed: {str(error)[:1200]}"
+    if interaction.command and interaction.command.name in {"check", "status"}:
+        embed = discord.Embed(description=message, color=FAVICON_COLOR)
+        if interaction.response.is_done():
+            await interaction.followup.send(embed=embed, ephemeral=True)
+        else:
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
     if interaction.response.is_done():
         await interaction.followup.send(message)
     else:
@@ -725,7 +733,8 @@ async def status_command(interaction: discord.Interaction):
     else:
         counts = "No WebUntis snapshot yet"
     error = f"\nLatest error: {bot.last_error[:800]}" if bot.last_error else ""
-    await interaction.response.send_message(f"Last successful check: {checked}\n{counts}{error}")
+    embed = discord.Embed(description=f"Last successful check: {checked}\n{counts}{error}", color=FAVICON_COLOR)
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 @bot.tree.command(name="restart", description="Restart the WebUntis bot")
@@ -748,7 +757,7 @@ async def restart_command(interaction: discord.Interaction):
 ])
 async def check_command(interaction: discord.Interaction, length: app_commands.Choice[str] | None = None):
     bot.remember_alert_channel(interaction)
-    await interaction.response.defer(thinking=True)
+    await interaction.response.defer(thinking=True, ephemeral=True)
     selected_length = length.value if length else "normal"
     range_label = "last month through the next 5 months" if selected_length == "full" else "the next 3 weeks"
     try:
@@ -762,7 +771,7 @@ async def check_command(interaction: discord.Interaction, length: app_commands.C
     except Exception as exc:
         bot.last_error = str(exc)
         message = f"Check failed: {str(exc)[:1500]}"
-    await interaction.followup.send(message)
+    await interaction.followup.send(embed=discord.Embed(description=message, color=FAVICON_COLOR), ephemeral=True)
 
 
 def main():
