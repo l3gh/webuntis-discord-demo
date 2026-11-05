@@ -328,7 +328,7 @@ class UntisDiscordBot(commands.Bot):
             class_name, weeks, past, future = parse_homework_options(tokens[1:])
         except ValueError as exc:
             await message.channel.send(
-                f"{exc} Usage: `.hw class:maths time:4 past:true` (time in weeks).",
+                f"{exc} Use `.hw help` for available options.",
                 allowed_mentions=discord.AllowedMentions.none(),
             )
             return
