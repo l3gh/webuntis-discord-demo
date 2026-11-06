@@ -21,6 +21,7 @@ class HomeworkHelpTests(unittest.IsolatedAsyncioTestCase):
         kwargs = message.channel.send.await_args.kwargs
         self.assertNotIn("ephemeral", kwargs)
         self.assertIsNone(kwargs["embed"].title)
+        self.assertEqual(kwargs["embed"].colour.value, 0xFF6033)
         self.assertTrue(kwargs["embed"].description.startswith("Defaults:\n`.hw class:all time:4 past:false future:true`\n\n"))
 
 
