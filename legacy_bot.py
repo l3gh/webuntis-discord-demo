@@ -57,7 +57,7 @@ def load_config():
 
 
 def save_config(config):
-    keys = ("WEBUNTIS_SUBDOMAIN", "WEBUNTIS_SCHOOL", "WEBUNTIS_USERNAME", "WEBUNTIS_PASSWORD", "DISCORD_WEBHOOK_URL", "DISCORD_BOT_TOKEN")
+    keys = ("WEBUNTIS_SUBDOMAIN", "WEBUNTIS_SCHOOL", "WEBUNTIS_USERNAME", "WEBUNTIS_PASSWORD", "DISCORD_WEBHOOK_URL", "DISCORD_BOT_TOKEN", "WEBUNTIS_LOG_WEBHOOK_URL")
     content = "# Private settings for legacy_bot.py\n" + "".join(f"{key}={json.dumps(config.get(key, ''), ensure_ascii=False)}\n" for key in keys)
     fd = os.open(ENV_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as handle:

@@ -30,6 +30,8 @@ Run `python legacy_bot.py --once` for a single check, or `python legacy_bot.py` 
 
 To use the Discord bot, add `DISCORD_BOT_TOKEN="..."` to `.env`, invite the bot with the `bot` and `applications.commands` scopes, and run `python discord_bot.py`. Enable the Message Content intent in the Discord developer settings for the `.hw` message command. The bot provides `/timetable`, `/homework`, `/exams`, `/status`, `/check`, and `/restart`. Replies and alerts can be visible to other server members, so use a server and channel appropriate for private school data. Don't run the bot and webhook watcher simultaneously: they share a timetable snapshot.
 
+Set `WEBUNTIS_LOG_WEBHOOK_URL` in `.env` to send event summaries to a separate Discord webhook. Logs include startup, command usage (including user, channel and `.hw` options), detected changes, reminders and failures; they do not include timetable or homework details. Webhook failures are printed locally and do not stop the bot. The environment variable of the same name also works and takes precedence.
+
 Optionally copy `display_names.example.json` to `display_names.json` and add subject, teacher or room labels. Keep mappings private if they identify people.
 
 The `.hw` message command defaults to all subjects, with due dates from today through the next four weeks. Use `.hw help` to see the available options. Use `time:` to change the window in weeks (1–52), `class:` to filter a subject, and `past:true` to include past dates. Add `future:false` with `past:true` for past dates and today only. For example: `.hw class:maths time:2 past:true future:false`. At least one direction must be enabled. The older `range:` option is also accepted, in weeks.

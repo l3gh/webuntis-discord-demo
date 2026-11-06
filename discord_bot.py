@@ -38,6 +38,34 @@ SCHOOL_TZ = ZoneInfo("Europe/Vienna")
 FAVICON_COLOR = 0xFF6033
 
 
+async def log_event(title, description, *, error=False):
+    """Send a best-effort event summary without interrupting the bot."""
+    try:
+        config = untis.load_config() or {}
+        url = os.environ.get("WEBUNTIS_LOG_WEBHOOK_URL") or config.get("WEBUNTIS_LOG_WEBHOOK_URL", "")
+        if not url:
+            return
+        embed = discord.Embed(title=title[:256], description=description[:4096],
+                              color=discord.Color.red() if error else FAVICON_COLOR,
+                              timestamp=datetime.now(timezone.utc))
+        webhook = discord.Webhook.from_url(url, client=bot)
+        await asyncio.wait_for(webhook.send(
+            embed=embed, username="WebUntis Logs",
+            allowed_mentions=discord.AllowedMentions.none(),
+        ), timeout=10)
+    except Exception as exc:
+        print(f"Webhook logging failed: {type(exc).__name__}", file=sys.stderr)
+
+
+def log_location(guild, channel, user):
+    def label(value):
+        return discord.utils.escape_markdown(str(value))[:200]
+    return (f"Server: **{label(getattr(guild, 'name', 'Direct message'))}**\n"
+            f"Channel: **{label(getattr(channel, 'name', 'Unknown'))}**\n"
+            f"User: **{label(getattr(user, 'display_name', 'Unknown'))}** "
+            f"(`{getattr(user, 'id', 'unknown')}`)")
+
+
 def add_months(day, months):
     month_index = day.month - 1 + months
     year = day.year + month_index // 12
@@ -245,11 +273,7 @@ def homework_embeds(items, names, label, start, end):
     return embeds
 
 
-def exam_description(item, names=None):
-    exam_day = untis.date_label(item.get("examDate") or item.get("date")) or "date unknown"
-    start = untis.time_label(item.get("startTime"))
-    end = untis.time_label(item.get("endTime"))
-    time_text = f" · {start}–{end}" if start and end else ""
+def exam_title(item, names=None):
     title = item.get("name") or item.get("title") or item.get("text") or item.get("subject") or "Exam"
     if isinstance(title, dict):
         title = title.get("name") or title.get("shortName") or "Exam"
@@ -265,7 +289,64 @@ def exam_description(item, names=None):
         subject = names.get("su", {}).get(str(subject_id), subject) if subject_id is not None else subject
         if str(subject).casefold() not in title.casefold():
             title = f"{subject} · {title}"
-    return f"Exam · {exam_day}{time_text} · {title}"
+    return title
+
+
+def exam_description(item, names=None):
+    exam_day = untis.date_label(item.get("examDate") or item.get("date")) or "date unknown"
+    start = untis.time_label(item.get("startTime"))
+    end = untis.time_label(item.get("endTime"))
+    time_text = f" · {start}–{end}" if start and end else ""
+    return f"Exam · {exam_day}{time_text} · {exam_title(item, names)}"
+
+
+def exam_display_title(item, names):
+    """Prefer the WebUntis subject; use the exam name when it is unavailable."""
+    subject = item.get("subject")
+    if isinstance(subject, dict):
+        subject = subject.get("name") or subject.get("shortName")
+    if subject and str(subject).strip():
+        subject = str(subject).strip()
+        subject_id = names.get("_subject_label_ids", {}).get(subject.casefold())
+        return str(names.get("su", {}).get(str(subject_id)) or subject)
+    return exam_title(item, names)
+
+
+def exam_embeds(items, names, start, end):
+    """Build mobile-friendly exam pages in the same style as homework."""
+    sections = []
+    for item in items:
+        title = discord.utils.escape_markdown(exam_display_title(item, names))
+        day = untis.date_label(item.get("examDate") or item.get("date")) or "date unknown"
+        start_time = untis.time_label(item.get("startTime"))
+        end_time = untis.time_label(item.get("endTime"))
+        time = f"{start_time}–{end_time}" if start_time and end_time else start_time or end_time
+        metadata = f"-# {discord.utils.escape_markdown(time)}" if time else ""
+        section = f"**{title}** · **{day}**" + (f"\n{metadata}" if metadata else "")
+        sections.extend(split_message(section, limit=3500))
+
+    pages, current = [], ""
+    for section in sections:
+        if current and len(current) + len(section) + 2 > 3500:
+            pages.append(current)
+            current = ""
+        current = f"{current}\n\n{section}" if current else section
+    if current:
+        pages.append(current)
+    if not pages:
+        pages = ["No exams are listed from this week through the next five months."]
+
+    date_range = f"{untis.date_label(untis.normal_date(start))} – {untis.date_label(untis.normal_date(end))}"
+    count = f"{len(items)} exam{'s' if len(items) != 1 else ''}"
+    embeds = []
+    for index, page in enumerate(pages):
+        embed = discord.Embed(title="Upcoming exams", description=page, color=FAVICON_COLOR)
+        footer = f"{date_range} · {count}"
+        if len(pages) > 1:
+            footer += f" · {index + 1}/{len(pages)}"
+        embed.set_footer(text=footer)
+        embeds.append(embed)
+    return embeds
 
 
 def change_lines(old, fresh, label, formatter):
@@ -335,9 +416,11 @@ class UntisDiscordBot(commands.Bot):
             guild_id = 0
         if guild_id:
             guild = discord.Object(id=guild_id)
-            self.tree.copy_global_to(guild=guild)
+            self.tree.clear_commands(guild=guild)
             guild_synced = await self.tree.sync(guild=guild)
-            print(f"Synced {len(guild_synced)} server command(s) for guild {guild_id}.")
+            print(f"Cleared server commands for guild {guild_id}; {len(guild_synced)} remain.")
+            channel_state.pop("guild_id", None)
+            save_json(CHANNEL_STATE, channel_state)
 
     async def on_ready(self):
         if not self.started:
@@ -347,6 +430,13 @@ class UntisDiscordBot(commands.Bot):
             self.poll_task = asyncio.create_task(self.poll_forever())
             self.reminder_task = asyncio.create_task(self.reminder_forever())
             asyncio.create_task(self.show_restart_presence())
+            await log_event("WebUntis bot started", "Connected to Discord and started polling.")
+
+    async def on_interaction(self, interaction):
+        if interaction.type == discord.InteractionType.application_command:
+            name = (interaction.data or {}).get("name", "unknown")
+            await log_event("Command used", f"`/{name}`\n" + log_location(
+                interaction.guild, interaction.channel, interaction.user))
 
     async def on_message(self, message):
         if message.author.bot or message.guild is None:
@@ -357,6 +447,9 @@ class UntisDiscordBot(commands.Bot):
             return
         if not tokens or tokens[0].casefold() != ".hw":
             return
+
+        command_text = discord.utils.escape_markdown(message.content[:1500])
+        asyncio.create_task(log_event("Command used", f"Command: {command_text}\n" + log_location(message.guild, message.channel, message.author)))
 
         if len(tokens) == 2 and tokens[1].casefold() == "help":
             embed = discord.Embed(description=(
@@ -387,6 +480,7 @@ class UntisDiscordBot(commands.Bot):
             for embed in homework_embeds(matches, names, label, start, end):
                 await message.channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
         except Exception as exc:
+            await log_event("Homework command failed", f"Error: `{type(exc).__name__}`", error=True)
             await message.channel.send(
                 f"Could not load WebUntis homework: {str(exc)[:1000]}",
                 allowed_mentions=discord.AllowedMentions.none(),
@@ -407,7 +501,7 @@ class UntisDiscordBot(commands.Bot):
         if member is None or not channel.permissions_for(member).send_messages:
             return
         self.alert_channel_id = channel.id
-        save_json(CHANNEL_STATE, {"guild_id": guild.id, "channel_id": channel.id})
+        save_json(CHANNEL_STATE, {"channel_id": channel.id})
 
     async def get_alert_channel(self):
         if self.alert_channel_id is not None:
@@ -435,7 +529,7 @@ class UntisDiscordBot(commands.Bot):
                 if channel is None or not channel.permissions_for(member).send_messages:
                     continue
                 self.alert_channel_id = channel.id
-                save_json(CHANNEL_STATE, {"guild_id": guild.id, "channel_id": channel.id})
+                save_json(CHANNEL_STATE, {"channel_id": channel.id})
                 return channel
         return None
 
@@ -556,6 +650,8 @@ class UntisDiscordBot(commands.Bot):
         self.snapshot = fresh
         self.last_checked = datetime.now(timezone.utc)
         self.last_error = None
+        if initial or lines:
+            await log_event("WebUntis check", f"{'Initial snapshot saved' if initial else 'Changes detected'}: {len(lines)} change(s).")
         return {"initial": initial, "changes": len(lines), "snapshot": fresh}
 
     async def poll_forever(self):
@@ -571,6 +667,7 @@ class UntisDiscordBot(commands.Bot):
             except Exception as exc:
                 self.last_error = str(exc)
                 print(f"WebUntis check failed: {exc}", file=sys.stderr)
+                await log_event("WebUntis check failed", f"Error: `{type(exc).__name__}`", error=True)
             await asyncio.sleep(FAST_POLL_SECONDS if fast_window else POLL_SECONDS)
 
     async def reminder_forever(self):
@@ -617,12 +714,14 @@ class UntisDiscordBot(commands.Bot):
                             allowed_mentions=discord.AllowedMentions(users=[discord.Object(id=BOT_OWNER_ID)]),
                         )
                     print(f"Posted due-tomorrow reminders and pinged Discord user {BOT_OWNER_ID}.")
+                    await log_event("Reminder sent", f"{len(homework)} homework item(s), {len(exams)} exam(s) due tomorrow.")
                 else:
                     print(f"No homework or exams due tomorrow ({untis.normal_date(tomorrow)}).")
                 save_json(REMINDER_STATE, {"last_sent_for": reminder_day.isoformat()})
             except Exception as exc:
                 self.last_error = str(exc)
                 print(f"Due-tomorrow reminder failed: {exc}", file=sys.stderr)
+                await log_event("Reminder failed", f"Error: `{type(exc).__name__}`", error=True)
 
 
 bot = UntisDiscordBot()
@@ -631,6 +730,7 @@ bot = UntisDiscordBot()
 @bot.tree.error
 async def command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
     print(f"Slash command failed: {error}", file=sys.stderr)
+    await log_event("Slash command failed", f"Error: `{type(error).__name__}`", error=True)
     message = f"That command failed: {str(error)[:1200]}"
     if interaction.command and interaction.command.name in {"check", "status"}:
         embed = discord.Embed(description=message, color=FAVICON_COLOR)
@@ -711,17 +811,11 @@ async def exams_command(interaction: discord.Interaction):
              if untis.normal_date(week_start) <= str(item.get("examDate") or item.get("date") or "")
              <= untis.normal_date(snapshot["exam_end"])]
     items.sort(key=lambda item: str(item.get("examDate") or item.get("date") or ""))
-    if not items:
-        message = "No exams are listed from this week through the next five months."
-    else:
-        message = "**WebUntis exams (this week through the next five months)**\n" + "\n".join(
-            f"• {exam_description(item, snapshot['entity_names'])}" for item in items
-        )
-    for index, chunk in enumerate(split_message(message)):
+    for index, embed in enumerate(exam_embeds(items, snapshot["entity_names"], week_start, snapshot["exam_end"])):
         if index == 0 and not interaction.response.is_done():
-            await interaction.response.send_message(chunk)
+            await interaction.response.send_message(embed=embed)
         else:
-            await interaction.followup.send(chunk)
+            await interaction.followup.send(embed=embed)
 
 
 @bot.tree.command(name="status", description="Check when the bot last reached WebUntis")
@@ -770,6 +864,7 @@ async def check_command(interaction: discord.Interaction, length: app_commands.C
             message = f"Checked the {range_label} window; nothing has changed."
     except Exception as exc:
         bot.last_error = str(exc)
+        await log_event("Manual check failed", f"Error: `{type(exc).__name__}`", error=True)
         message = f"Check failed: {str(exc)[:1500]}"
     await interaction.followup.send(embed=discord.Embed(description=message, color=FAVICON_COLOR), ephemeral=True)
 
