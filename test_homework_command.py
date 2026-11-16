@@ -59,6 +59,15 @@ class HomeworkCommandTests(unittest.TestCase):
         self.assertEqual(bot.parse_homework_options(["past:true"]), ("all", 4, True, True))
         self.assertEqual(bot.parse_homework_options(["past:true", "future:false", "range:3"]), ("all", 3, True, False))
 
+    def test_tomorrow_range(self):
+        self.assertEqual(bot.parse_homework_options(["range:tmrw"]), ("all", "tmrw", False, True))
+        tomorrow = bot.datetime.now(bot.SCHOOL_TZ).date() + bot.timedelta(days=1)
+        items = [{"dueDate": bot.untis.normal_date(tomorrow)}, {"dueDate": "20000101"}]
+        with patch.object(bot, "webuntis_connection", return_value=("school", "endpoint", object(), {})), patch.object(bot.untis, "fetch_plan_markers", return_value=(items, [])), patch.object(bot.untis, "load_entity_names", return_value={}):
+            _, start, end, result, _ = bot.fetch_homework_range("tmrw")
+        self.assertEqual((start, end), (tomorrow, tomorrow))
+        self.assertEqual(result, items[:1])
+
     def test_invalid_options(self):
         for tokens in (["time:0"], ["time:53"], ["time:no"], ["past:no"], ["past:false", "future:false"], ["future:false"], ["class:"], ["time:1", "range:1"], ["unknown:1"]):
             with self.subTest(tokens=tokens), self.assertRaises(ValueError):

@@ -140,8 +140,11 @@ def fetch_snapshot(full=False):
 def fetch_homework_range(weeks, past=True, future=True):
     prefix, endpoint, opener, _auth = webuntis_connection()
     today = datetime.now(SCHOOL_TZ).date()
-    start = today - timedelta(weeks=weeks) if past else today
-    end = today + timedelta(weeks=weeks) if future else today
+    if weeks == "tmrw":
+        start = end = today + timedelta(days=1)
+    else:
+        start = today - timedelta(weeks=weeks) if past else today
+        end = today + timedelta(weeks=weeks) if future else today
     homework, _ = untis.fetch_plan_markers(prefix, start, end, opener)
     names = untis.load_entity_names(opener, endpoint)
     homework = [item for item in homework if item_in_window(item, "dueDate", start, end)]
@@ -159,10 +162,10 @@ def parse_homework_options(tokens):
     if "time" in options and "range" in options:
         raise ValueError("Use time only once.")
     try:
-        weeks = int(options.get("time", options.get("range", str(HW_COMMAND_DEFAULT_WEEKS))))
+        weeks = "tmrw" if options.get("range", "").casefold() == "tmrw" else int(options.get("time", options.get("range", str(HW_COMMAND_DEFAULT_WEEKS))))
     except ValueError:
         raise ValueError("Time must be a whole number of weeks.") from None
-    if not 1 <= weeks <= HW_COMMAND_MAX_WEEKS:
+    if weeks != "tmrw" and not 1 <= weeks <= HW_COMMAND_MAX_WEEKS:
         raise ValueError(f"Time must be 1–{HW_COMMAND_MAX_WEEKS} weeks.")
     flags = {}
     for key in ("past", "future"):
@@ -457,6 +460,7 @@ class UntisDiscordBot(commands.Bot):
                 f"`.hw class:all time:{HW_COMMAND_DEFAULT_WEEKS} past:false future:true`\n\n"
                 "`class:` Filter by subject; `all` includes every subject.\n"
                 f"`time:` Window in weeks (1–{HW_COMMAND_MAX_WEEKS}); `range:` also works.\n"
+                "`range:tmrw` Show only homework due tomorrow.\n"
                 "`past:` Include past dates; `future:` include future dates. "
                 "Today is always included; at least one must be true."
             ), color=FAVICON_COLOR)
