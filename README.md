@@ -112,3 +112,5 @@ This is a proof of concept, not an official WebUntis integration. Login and API 
 The bot uses the `Europe/Vienna` timezone. It checks for changes periodically, so alerts are not instant. It only catches changes within the date range it checks.
 
 Your `.env` contains credentials. Local state files can contain timetable, homework and Discord information. These files and personal display-name mappings are excluded by `.gitignore`; review files before committing or sharing them, especially if you change the ignore rules.
+
+Use `.hw range:tmrw` for homework due only tomorrow in the school timezone. Subject filters still apply. This range overrides date direction flags, though at least one flag must remain true.
