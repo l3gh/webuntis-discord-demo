@@ -394,7 +394,7 @@ class UntisDiscordBot(commands.Bot):
         intents.message_content = True
         super().__init__(command_prefix=commands.when_mentioned, intents=intents,
                          allowed_mentions=discord.AllowedMentions.none(),
-                         activity=discord.Game(name="Restarted"))
+                         activity=discord.Activity(type=discord.ActivityType.watching, name="WebUntis"))
         self.alert_channel_id = None
         try:
             self.alert_channel_id = json.loads(CHANNEL_STATE.read_text("utf-8")).get("channel_id")
