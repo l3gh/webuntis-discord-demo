@@ -57,6 +57,8 @@ Using `/timetable`, `/homework`, `/exams`, `/status` or `/check` in another serv
 
 Leave the process running for automatic checks and reminders. Choose either the Discord bot or the standalone webhook watcher. They share the same saved timetable.
 
+Timetable alerts name the change, such as a cancellation, teacher substitution, room change or moved lesson. Each alert shows the previous and new values for every changed field. If several things change in one lesson, all labels appear together above its details. A lesson disappearing from the timetable is labelled "Removed from timetable"; cancellations require an explicit WebUntis cancellation status. When WebUntis supplies a unique lesson ID, moving the lesson produces one alert instead of a removal and addition.
+
 ## Commands
 
 | Command | What you get |

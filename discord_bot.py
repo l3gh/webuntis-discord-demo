@@ -562,17 +562,21 @@ class UntisDiscordBot(commands.Bot):
                 fresh_timetable_window = [item for index, item in enumerate(fresh_timetable_window)
                                           if str(item.get("date", "")) >= known_timetable_start
                                           or untis.record_key(item, index) in old_keys]
-            for kind, item in untis.diff(old_timetable_window, fresh_timetable_window):
+            for change in untis.diff(old_timetable_window, fresh_timetable_window):
+                item = change.record
                 item_day = None
                 try:
                     item_day = datetime.strptime(str(item.get("date", "")), "%Y%m%d").date()
                 except (ValueError, TypeError):
                     pass
-                if kind == "Added" and item_day is not None and item_day > old_timetable_end:
+                if change.kind == "Added" and item_day is not None and item_day > old_timetable_end:
                     # A first full scan widens the known baseline. Don't report
                     # newly visible lessons as changes until a full baseline exists.
                     continue
-                lines.append((f"Timetable {kind.lower()}", untis.pretty(item, fresh["entity_names"])))
+                lines.append(untis.format_change(
+                    change, fresh["entity_names"],
+                    escape=lambda value: discord.utils.escape_markdown(discord.utils.escape_mentions(str(value))),
+                ))
 
         if old_plan is None:
             initial = True
@@ -619,7 +623,10 @@ class UntisDiscordBot(commands.Bot):
             for chunk in split_message(message):
                 await channel.send(
                     chunk,
-                    allowed_mentions=discord.AllowedMentions(users=[discord.Object(id=BOT_OWNER_ID)]),
+                    allowed_mentions=discord.AllowedMentions(
+                        everyone=False, roles=False, replied_user=False,
+                        users=[discord.Object(id=BOT_OWNER_ID)],
+                    ),
                 )
 
         if old_timetable is None:

@@ -17,6 +17,8 @@ from io import BytesIO
 import uuid
 from pathlib import Path
 
+from timetable_changes import diff, format_change, is_cancelled as _is_cancelled
+
 STATE = Path(__file__).with_name("legacy_state.json")
 ENV_FILE = Path(__file__).with_name(".env")
 STATUS = Path(__file__).with_name("watcher_status.json")
@@ -226,18 +228,6 @@ def pretty(record, entity_names=None):
     return text or json.dumps(record, ensure_ascii=False, sort_keys=True)
 
 
-def diff(old, fresh):
-    before, after = {}, {}
-    for i, rec in enumerate(old):
-        before[record_key(rec, i)] = rec
-    for i, rec in enumerate(fresh):
-        after[record_key(rec, i)] = rec
-    out = [("Added", after[k]) for k in after.keys() - before.keys()]
-    out += [("Removed", before[k]) for k in before.keys() - after.keys()]
-    out += [("Changed", after[k]) for k in after.keys() & before.keys() if after[k] != before[k]]
-    return sorted(out, key=lambda row: schedule_sort_key(row[1]))
-
-
 def send_discord(message, hook):
     if not hook:
         print("(Discord not configured; print-only mode)")
@@ -381,11 +371,6 @@ def _period_key(record):
     subject_ids = sorted(str(x.get("id")) for x in subjects if isinstance(x, dict) and x.get("id") is not None)
     return (str(record.get("date", "")), str(record.get("startTime", "")),
             str(record.get("endTime", "")), tuple(subject_ids))
-
-
-def _is_cancelled(record):
-    status = str(record.get("code") or record.get("status") or "").strip().casefold()
-    return status in {"cancelled", "canceled", "cancel", "entfall", "ausfall"}
 
 
 def timetable_png(entries, monday, entity_names=None, range_start=None, range_end=None,
@@ -870,8 +855,9 @@ def demo(hook=""):
     new = [{"date": 20261023, "startTime": 900, "endTime": 950, "su": [{"name": "Math"}], "ro": [{"name": "14"}], "lsid": 1},
            {"date": 20261023, "startTime": 1000, "endTime": 1050, "su": [{"name": "Physics"}], "ro": [{"name": "7"}], "lsid": 2}]
     lines = ["WebUntis watcher test (simulated)"]
-    for kind, item in diff(old, new):
-        lines.append(f"{kind}: {pretty(item)}")
+    for change in diff(old, new):
+        title, detail = format_change(change)
+        lines.append(f"\n{title}\n{detail}")
     message = "\n".join(lines)
     print(message)
     if hook:
@@ -1038,10 +1024,9 @@ def main():
                 found = diff(old, fresh)
                 if found:
                     lines = [f"WebUntis timetable update: {len(found)} change(s)"]
-                    for kind, item in found[:20]:
-                        lines.append(f"{kind}: {pretty(item, entity_names)}")
-                    if len(found) > 20:
-                        lines.append(f"... and {len(found) - 20} more")
+                    for change in found:
+                        title, detail = format_change(change, entity_names)
+                        lines.append(f"\n{title}\n{detail}")
                     message = "\n".join(lines)
                     print(message)
                     send_discord(message, hook)
