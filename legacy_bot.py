@@ -397,16 +397,20 @@ def timetable_png(entries, monday, entity_names=None, range_start=None, range_en
         "time": "#a2b0bf" if dark else "#72808c",
         "detail": "#9caaba" if dark else "#657482",
         "footer": "#94a3b3" if dark else "#82909c",
-        "cancel_bg": "#24171d" if dark else "#fde5e5",
+        "cancel_bg": "#24171d" if dark else "#fce4e6",
         "cancel_edge": "#71313d" if dark else "#e6a3a3",
         "cancel_text": "#ff7589" if dark else "#8f3838",
-        "exam_bg": "#242218" if dark else "#fff4cb",
+        "exam_bg": "#242218" if dark else "#fff9df",
         "exam_edge": "#8a6d2e" if dark else "#e6c65f",
-        "exam_accent": "#f0b83d" if dark else "#d5a923",
+        "exam_accent": "#f0b83d" if dark else "#ffda24",
         "exam_text": "#f3ca68" if dark else "#8b6f22",
-        "homework_bg": "#172433" if dark else "#eaf2fb",
         "homework_edge": "#31577b" if dark else "#b7cbe0",
-        "homework_accent": "#53a8ff" if dark else "#5b8fc5",
+        "homework_accent": "#86b5df" if dark else "#52799f",
+        "change_bg": "#163329" if dark else "#dff6eb",
+        "change_edge": "#327658" if dark else "#a7d8c0",
+        "change_accent": "#39c78a" if dark else "#199b63",
+        "cancel_accent": "#ff626c" if dark else "#ff4048",
+        "lesson_accent": "#748392" if dark else "#c3cbd1",
         "exam_badge_bg": "#f0b83d" if dark else "#fff0bd",
         "exam_badge_text": "#171a1e" if dark else "#8b6f22",
     }
@@ -514,7 +518,6 @@ def timetable_png(entries, monday, entity_names=None, range_start=None, range_en
             draw.line((box[0], mid_y, box[2], mid_y), fill="#b94747", width=2)
     draw.text((left, 26), "TIMETABLE", font=small_font, fill=palette["muted"])
     draw.text((left, 48), f"{monday.strftime('%d %B')} – {(monday + timedelta(days=4)).strftime('%d %B %Y')}", font=title_font, fill=palette["title"])
-    colors = ["#3e80a8", "#5978a9", "#428c83", "#96735b", "#7466a0", "#668b52"]
     day_names = ["MON", "TUE", "WED", "THU", "FRI"]
     for idx, name in enumerate(day_names):
         x = left + 12 + idx * col_w
@@ -564,26 +567,52 @@ def timetable_png(entries, monday, entity_names=None, range_start=None, range_en
             is_exam_period = bool(matching_exams)
             has_homework = _period_key(item) in homework_period_keys
             is_cancelled = _is_cancelled(item)
-            card_fill = palette["cancel_bg"] if is_cancelled else (palette["exam_bg"] if is_exam_period else (palette["homework_bg"] if has_homework else palette["lesson"]))
-            card_edge = palette["cancel_edge"] if is_cancelled else (palette["exam_edge"] if is_exam_period else (palette["homework_edge"] if has_homework else palette["lesson_edge"]))
-            accent = "#ff536f" if is_cancelled and dark else ("#cf4545" if is_cancelled else (palette["exam_accent"] if is_exam_period else (palette["homework_accent"] if has_homework else ("#263442" if dark else colors[idx]))))
-            draw.rounded_rectangle((bx0, y0, bx1, y1), radius=8, fill=card_fill, outline=card_edge, width=1)
+            is_changed = str(item.get("code") or item.get("status") or "").casefold() in {
+                "irregular", "changed", "substitution", "substituted"}
+            for field in ("su", "te", "ro", "kl"):
+                assignments = item.get(field) or []
+                if isinstance(assignments, dict):
+                    assignments = [assignments]
+                is_changed |= any(isinstance(value, dict) and value.get("orgid") is not None
+                                  and str(value["orgid"]) != str(value.get("id"))
+                                  for value in assignments)
+            status = "cancel" if is_cancelled else ("exam" if is_exam_period else ("change" if is_changed else None))
+            card_fill = palette[f"{status}_bg"] if status else palette["lesson"]
+            card_edge = palette[f"{status}_edge"] if status else palette["lesson_edge"]
+            if has_homework and not status:
+                card_edge = palette["homework_edge"]
+            accent = palette[f"{status}_accent"] if status else palette["lesson_accent"]
+            draw.rounded_rectangle((bx0, y0, bx1, y1), radius=8, fill=card_fill, outline=card_edge,
+                                   width=2 if has_homework else 1)
             draw.rounded_rectangle((bx0 + 1, y0 + 5, bx0 + 5, y1 - 5), radius=2, fill=accent)
             tx, ty = bx0 + 13, y0 + 7
+            # Draw shapes directly so markers do not depend on emoji fonts.
+            marker_right = bx1 - 11
+            if status:
+                mx, my = marker_right - 7, y0 + 17
+                if is_cancelled:
+                    draw.polygon(((mx, my - 8), (mx - 8, my + 7), (mx + 8, my + 7)), fill=accent)
+                elif is_exam_period:
+                    draw.ellipse((mx - 7, my - 7, mx + 7, my + 7), fill=accent)
+                else:
+                    draw.rounded_rectangle((mx - 7, my - 7, mx + 7, my + 7), radius=2, fill=accent)
+                marker_right -= 24
+            if has_homework:
+                hx, hy = marker_right - 13, y0 + 10
+                ink = palette["homework_accent"]
+                draw.rounded_rectangle((hx, hy, hx + 13, hy + 16), radius=2, outline=ink, width=2)
+                draw.line((hx + 4, hy + 1, hx + 4, hy + 15), fill=ink)
+                for offset in (5, 9, 12):
+                    draw.line((hx + 7, hy + offset, hx + 10, hy + offset), fill=ink)
+                marker_right -= 24
             subject = lesson_line(item, entity_names).splitlines()[0]
             subject = subject.split(" · ", 1)[-1].rstrip("*")
-            draw_lesson_text(subject[:25], (tx, ty), subject_font,
-                             palette["cancel_text"] if is_cancelled else palette["subject"], is_cancelled)
-            if is_cancelled and y1 - y0 >= 58 and bx1 - bx0 >= 180:
-                tag = "AUSFALL"
-                tag_color = "#ff7589" if dark else "#b94747"
-                tag_box = draw.textbbox((0, 0), tag, font=marker_font)
-                draw.text((bx1 - (tag_box[2] - tag_box[0]) - 10, ty + 2), tag, font=marker_font, fill=tag_color)
-            elif (is_exam_period or has_homework) and y1 - y0 >= 58:
-                tag = "EXAM + HW" if is_exam_period and has_homework else ("EXAM" if is_exam_period else "HW")
-                tag_color = palette["exam_text"] if is_exam_period else ("#69b5ff" if dark else "#52799f")
-                tag_box = draw.textbbox((0, 0), tag, font=marker_font)
-                draw.text((bx1 - (tag_box[2] - tag_box[0]) - 10, ty + 2), tag, font=marker_font, fill=tag_color)
+            available = (marker_right - 7 if status or has_homework else bx1 - 10) - tx
+            if draw.textlength(subject, font=subject_font) > available:
+                while subject and draw.textlength(subject + "…", font=subject_font) > available:
+                    subject = subject[:-1]
+                subject += "…"
+            draw_lesson_text(subject, (tx, ty), subject_font, palette["subject"], is_cancelled)
             ty += 22
             draw_lesson_text(f"{start // 60:02d}:{start % 60:02d}–{end // 60:02d}:{end % 60:02d}",
                              (tx, ty), small_font, "#ff7589" if is_cancelled and dark else ("#8f5555" if is_cancelled else palette["time"]), is_cancelled)
@@ -604,8 +633,8 @@ def timetable_png(entries, monday, entity_names=None, range_start=None, range_en
                 continue
             ey0, ey1 = y_for(exam_start) + 3, max(y_for(exam_end) - 3, y_for(exam_start) + 48)
             draw.rounded_rectangle((x0 + 5, ey0, x1 - 5, ey1), radius=8,
-                                   fill=palette["exam_badge_bg"] if dark else "#fff0bd",
-                                   outline=palette["exam_accent"] if dark else "#dfb83e", width=2)
+                                   fill=palette["exam_bg"],
+                                   outline=palette["exam_edge"], width=1)
             draw.rounded_rectangle((x0 + 6, ey0 + 5, x0 + 11, ey1 - 5), radius=2, fill=palette["exam_accent"])
             title = str(exam.get("name") or exam.get("subject") or "Exam")
             draw.text((x0 + 17, ey0 + 7), ("EXAM · " + title)[:28], font=subject_font, fill=palette["exam_text"])
