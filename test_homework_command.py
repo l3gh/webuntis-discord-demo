@@ -59,14 +59,20 @@ class HomeworkCommandTests(unittest.TestCase):
         self.assertEqual(bot.parse_homework_options(["past:true"]), ("all", 4, True, True))
         self.assertEqual(bot.parse_homework_options(["past:true", "future:false", "range:3"]), ("all", 3, True, False))
 
-    def test_tomorrow_range(self):
-        self.assertEqual(bot.parse_homework_options(["range:tmrw"]), ("all", "tmrw", False, True))
-        tomorrow = bot.datetime.now(bot.SCHOOL_TZ).date() + bot.timedelta(days=1)
-        items = [{"dueDate": bot.untis.normal_date(tomorrow)}, {"dueDate": "20000101"}]
-        with patch.object(bot, "webuntis_connection", return_value=("school", "endpoint", object(), {})), patch.object(bot.untis, "fetch_plan_markers", return_value=(items, [])), patch.object(bot.untis, "load_entity_names", return_value={}):
-            _, start, end, result, _ = bot.fetch_homework_range("tmrw")
-        self.assertEqual((start, end), (tomorrow, tomorrow))
-        self.assertEqual(result, items[:1])
+    def test_single_day_ranges(self):
+        with patch.object(bot, "datetime") as clock:
+            clock.now.return_value = datetime(2026, 11, 1, tzinfo=bot.SCHOOL_TZ)
+            days = (date(2026, 10, 31), date(2026, 11, 1), date(2026, 11, 2))
+            items = [{"dueDate": bot.untis.normal_date(day)} for day in days]
+            with patch.object(bot, "webuntis_connection", return_value=("school", "endpoint", object(), {})), patch.object(bot.untis, "fetch_plan_markers", return_value=(items, [])) as fetch, patch.object(bot.untis, "load_entity_names", return_value={}):
+                for alias, day, item in zip(("yest", "tdy", "tmrw"), days, items):
+                    with self.subTest(alias=alias):
+                        subject, weeks, past, future = bot.parse_homework_options([f"range:{alias}"])
+                        self.assertEqual((subject, weeks, past, future), ("all", alias, False, True))
+                        _, start, end, result, _ = bot.fetch_homework_range(weeks, past, future)
+                        self.assertEqual((start, end), (day, day))
+                        self.assertEqual(fetch.call_args.args[1:3], (day, day))
+                        self.assertEqual(result, [item])
 
     def test_invalid_options(self):
         for tokens in (["time:0"], ["time:53"], ["time:no"], ["past:no"], ["past:false", "future:false"], ["future:false"], ["class:"], ["time:1", "range:1"], ["unknown:1"]):

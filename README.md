@@ -86,6 +86,8 @@ Shows maths homework due from today through the next two weeks. `class:` filters
 
 Shows maths homework with due dates in the past two weeks through today. `past:true` includes past dates; `future:false` excludes future dates. At least one direction must be enabled. The older `range:` option is also accepted, in weeks.
 
+Use `.hw range:yest`, `.hw range:tdy`, or `.hw range:tmrw` for homework due on a single day in the school timezone. Subject filters still apply. These ranges override the date direction flags, though at least one flag must remain true.
+
 ## Webhook watcher
 
 You can run `legacy_bot.py` on its own and send changes through a Discord webhook. It uses WebUntis's legacy JSON-RPC API and doesn't need a Discord bot token.
@@ -112,5 +114,3 @@ This is a proof of concept, not an official WebUntis integration. Login and API 
 The bot uses the `Europe/Vienna` timezone. It checks for changes periodically, so alerts are not instant. It only catches changes within the date range it checks.
 
 Your `.env` contains credentials. Local state files can contain timetable, homework and Discord information. These files and personal display-name mappings are excluded by `.gitignore`; review files before committing or sharing them, especially if you change the ignore rules.
-
-Use `.hw range:tmrw` for homework due only tomorrow in the school timezone. Subject filters still apply. This range overrides date direction flags, though at least one flag must remain true.

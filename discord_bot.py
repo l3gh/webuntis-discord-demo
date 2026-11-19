@@ -33,6 +33,7 @@ TIMETABLE_LOOKAHEAD_DAYS = 35
 NORMAL_CHECK_DAYS = 21
 HW_COMMAND_DEFAULT_WEEKS = 4
 HW_COMMAND_MAX_WEEKS = 52
+HW_DAY_OFFSETS = {"yest": -1, "tdy": 0, "tmrw": 1}
 BOT_OWNER_ID = 976444034266583041
 SCHOOL_TZ = ZoneInfo("Europe/Vienna")
 FAVICON_COLOR = 0xFF6033
@@ -140,8 +141,8 @@ def fetch_snapshot(full=False):
 def fetch_homework_range(weeks, past=True, future=True):
     prefix, endpoint, opener, _auth = webuntis_connection()
     today = datetime.now(SCHOOL_TZ).date()
-    if weeks == "tmrw":
-        start = end = today + timedelta(days=1)
+    if weeks in HW_DAY_OFFSETS:
+        start = end = today + timedelta(days=HW_DAY_OFFSETS[weeks])
     else:
         start = today - timedelta(weeks=weeks) if past else today
         end = today + timedelta(weeks=weeks) if future else today
@@ -161,12 +162,14 @@ def parse_homework_options(tokens):
         options[key] = value
     if "time" in options and "range" in options:
         raise ValueError("Use time only once.")
-    try:
-        weeks = "tmrw" if options.get("range", "").casefold() == "tmrw" else int(options.get("time", options.get("range", str(HW_COMMAND_DEFAULT_WEEKS))))
-    except ValueError:
-        raise ValueError("Time must be a whole number of weeks.") from None
-    if weeks != "tmrw" and not 1 <= weeks <= HW_COMMAND_MAX_WEEKS:
-        raise ValueError(f"Time must be 1–{HW_COMMAND_MAX_WEEKS} weeks.")
+    weeks = options.get("range", "").casefold()
+    if weeks not in HW_DAY_OFFSETS:
+        try:
+            weeks = int(options.get("time", options.get("range", str(HW_COMMAND_DEFAULT_WEEKS))))
+        except ValueError:
+            raise ValueError("Time must be a whole number of weeks.") from None
+        if not 1 <= weeks <= HW_COMMAND_MAX_WEEKS:
+            raise ValueError(f"Time must be 1–{HW_COMMAND_MAX_WEEKS} weeks.")
     flags = {}
     for key in ("past", "future"):
         value = options.get(key, "false" if key == "past" else "true").casefold()
@@ -460,9 +463,9 @@ class UntisDiscordBot(commands.Bot):
                 f"`.hw class:all time:{HW_COMMAND_DEFAULT_WEEKS} past:false future:true`\n\n"
                 "`class:` Filter by subject; `all` includes every subject.\n"
                 f"`time:` Window in weeks (1–{HW_COMMAND_MAX_WEEKS}); `range:` also works.\n"
-                "`range:tmrw` Show only homework due tomorrow.\n"
+                "`range:yest`, `range:tdy`, `range:tmrw` Show homework due yesterday, today, or tomorrow.\n"
                 "`past:` Include past dates; `future:` include future dates. "
-                "Today is always included; at least one must be true."
+                "Week ranges include today. At least one flag must be true."
             ), color=FAVICON_COLOR)
             await message.channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
             return
