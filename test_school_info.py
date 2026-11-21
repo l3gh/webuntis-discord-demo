@@ -39,8 +39,13 @@ class TimetableLookupTests(unittest.TestCase):
 
 
 class SchoolCommandTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        logging = patch.object(bot, "log_event", new_callable=AsyncMock)
+        logging.start()
+        self.addCleanup(logging.stop)
+
     def interaction(self, user_id=bot.BOT_OWNER_ID):
-        return SimpleNamespace(user=SimpleNamespace(id=user_id),
+        return SimpleNamespace(data=None, command=None, guild=None, channel=None, user=SimpleNamespace(id=user_id),
                                response=SimpleNamespace(send_message=AsyncMock(), defer=AsyncMock()),
                                followup=SimpleNamespace(send=AsyncMock()))
 

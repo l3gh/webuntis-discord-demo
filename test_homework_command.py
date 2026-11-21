@@ -9,13 +9,14 @@ import discord_bot as bot
 class HomeworkHelpTests(unittest.IsolatedAsyncioTestCase):
     async def test_invalid_option_points_to_help(self):
         message = SimpleNamespace(author=SimpleNamespace(bot=False), guild=object(), content=".hw wrong:value", channel=SimpleNamespace(send=AsyncMock()))
-        await bot.UntisDiscordBot.on_message(None, message)
+        with patch.object(bot, "log_event", new_callable=AsyncMock):
+            await bot.bot.on_message(message)
         self.assertEqual(message.channel.send.await_args.args[0], "Invalid option. Use `.hw help` for available options.")
 
     async def test_help_sends_public_embed_without_fetching(self):
         message = SimpleNamespace(author=SimpleNamespace(bot=False), guild=object(), content=".hw help", channel=SimpleNamespace(send=AsyncMock()))
-        with patch.object(bot, "fetch_homework_range") as fetch:
-            await bot.UntisDiscordBot.on_message(None, message)
+        with patch.object(bot, "fetch_homework_range") as fetch, patch.object(bot, "log_event", new_callable=AsyncMock):
+            await bot.bot.on_message(message)
         fetch.assert_not_called()
         message.channel.send.assert_awaited_once()
         kwargs = message.channel.send.await_args.kwargs
