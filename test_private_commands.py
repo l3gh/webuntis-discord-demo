@@ -6,8 +6,14 @@ import discord_bot as bot
 
 
 class PrivateCommandTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        logging = patch.object(bot, "log_event", new_callable=AsyncMock)
+        logging.start()
+        self.addCleanup(logging.stop)
+
     def interaction(self):
-        return SimpleNamespace(response=SimpleNamespace(send_message=AsyncMock(), defer=AsyncMock(), is_done=Mock(return_value=False)),
+        return SimpleNamespace(data=None, command=None, guild=None, channel=None, user=None,
+                               response=SimpleNamespace(send_message=AsyncMock(), defer=AsyncMock(), is_done=Mock(return_value=False)),
                                followup=SimpleNamespace(send=AsyncMock()))
 
     def assert_private_orange(self, call):
@@ -35,7 +41,7 @@ class PrivateCommandTests(unittest.IsolatedAsyncioTestCase):
     async def test_command_errors_stay_private_before_and_after_defer(self):
         for done in (False, True):
             interaction = self.interaction()
-            interaction.command = SimpleNamespace(name='status')
+            interaction.command = bot.status_command
             interaction.response.is_done.return_value = done
             await bot.command_error(interaction, RuntimeError('failure'))
             self.assert_private_orange((interaction.followup.send if done else interaction.response.send_message).await_args)

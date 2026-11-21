@@ -9,6 +9,7 @@ import os
 import re
 import shlex
 import sys
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
@@ -61,13 +62,78 @@ async def log_event(title, description, *, error=False):
         print(f"Webhook logging failed: {type(exc).__name__}", file=sys.stderr)
 
 
+def log_text(value, limit=100):
+    value = str(value)
+    if len(value) > limit:
+        value = value[:limit] + "…"
+    value = value.replace("\r", "\\r").replace("\n", "\\n")
+    return discord.utils.escape_markdown(discord.utils.escape_mentions(value), ignore_links=False)
+
+
 def log_location(guild, channel, user):
-    def label(value):
-        return discord.utils.escape_markdown(str(value))[:200]
-    return (f"Server: **{label(getattr(guild, 'name', 'Direct message'))}**\n"
-            f"Channel: **{label(getattr(channel, 'name', 'Unknown'))}**\n"
-            f"User: **{label(getattr(user, 'display_name', 'Unknown'))}** "
-            f"(`{getattr(user, 'id', 'unknown')}`)")
+    def place(obj, fallback):
+        name = log_text(getattr(obj, "name", None) or fallback)
+        snowflake = getattr(obj, "id", None)
+        return f"**{name}** (`{snowflake}`)" if snowflake is not None else f"**{name}**"
+
+    username = getattr(user, "name", None)
+    display_name = getattr(user, "display_name", None) or username or "Unknown"
+    account = f"@{log_text(username)}, " if username else ""
+    return (f"Server: {place(guild, 'Direct message')}\n"
+            f"Channel: {place(channel, 'Unknown')}\n"
+            f"User: **{log_text(display_name)}** ({account}`{getattr(user, 'id', 'unknown')}`)")
+
+
+async def log_command(command, guild, channel, user, *, options=(), error=None):
+    status = "✅" if error is None else f"❌ {log_text(error, limit=300)}"
+    description = "\n".join([f"`{command}`", log_location(guild, channel, user), *options, status])
+    await log_event("Command used", description, error=error is not None)
+
+
+async def log_slash_command(interaction, *, error=None):
+    data = interaction.data or {}
+    command = interaction.command
+    parameters = {p.display_name: p for p in command.parameters} if isinstance(command, app_commands.Command) else {}
+    submitted = data.get("options", [])
+    while submitted and submitted[0]["type"] in (1, 2):  # Subcommand or subcommand group.
+        submitted = submitted[0].get("options", [])
+    options = []
+    for option in submitted:
+        name = option["name"]
+        value = option["value"]
+        parameter = parameters.get(name)
+        choices = {choice.value: choice.name for choice in parameter.choices} if parameter else {}
+        if value in choices:
+            shown = log_text(choices[value])
+        elif isinstance(value, bool):
+            shown = str(value).lower()
+        else:
+            shown = f"||{log_text(value, limit=350)}||" if value != "" else "||[empty]||"
+        options.append(f"{log_text(name)}: {shown}")
+    name = log_text(command.qualified_name if command else data.get("name", "unknown"))
+    await log_command(f"/{name}", interaction.guild, interaction.channel, interaction.user, options=options, error=error)
+
+
+async def log_homework_command(message, *, error=None):
+    parts = message.content.split(maxsplit=1)
+    options = [f"Options: ||{log_text(parts[1], limit=1000)}||"] if len(parts) == 2 else []
+    await log_command(".hw", message.guild, message.channel, message.author, options=options, error=error)
+
+
+def command_error_detail(error):
+    error = getattr(error, "original", error)
+    if isinstance(error, school_info.SchoolInfoUnavailable):
+        return str(error)
+    if isinstance(error, untis.WebUntisApiError) and re.fullmatch(r"-?\d+", error.code):
+        return f"WebUntis API error {error.code}"
+    if isinstance(error, (discord.HTTPException, urllib.error.HTTPError)):
+        return f"{type(error).__name__} (HTTP {error.status})"
+    return type(error).__name__
+
+
+async def report_slash_failure(interaction, error):
+    interaction.command_failed = True
+    await log_slash_command(interaction, error=error)
 
 
 def add_months(day, months):
@@ -483,11 +549,8 @@ class UntisDiscordBot(commands.Bot):
             asyncio.create_task(self.show_restart_presence())
             await log_event("WebUntis bot started", "Connected to Discord and started polling.")
 
-    async def on_interaction(self, interaction):
-        if interaction.type == discord.InteractionType.application_command:
-            name = (interaction.data or {}).get("name", "unknown")
-            await log_event("Command used", f"`/{name}`\n" + log_location(
-                interaction.guild, interaction.channel, interaction.user))
+    async def on_app_command_completion(self, interaction, command):
+        await log_slash_command(interaction)
 
     async def on_message(self, message):
         if message.author.bot or message.guild is None:
@@ -495,14 +558,28 @@ class UntisDiscordBot(commands.Bot):
         try:
             tokens = shlex.split(message.content)
         except ValueError:
+            parts = message.content.split(maxsplit=1)
+            if parts and parts[0].strip("'\"").casefold() == ".hw":
+                await log_homework_command(message, error="Invalid quoting.")
             return
         if not tokens or tokens[0].casefold() != ".hw":
             return
 
-        command_text = discord.utils.escape_markdown(message.content[:1500])
-        asyncio.create_task(log_event("Command used", f"Command: {command_text}\n" + log_location(message.guild, message.channel, message.author)))
+        error = None
+        try:
+            error = await self._send_homework_response(message, tokens[1:])
+        except Exception as exc:
+            error = command_error_detail(exc)
+            await message.channel.send(
+                f"Could not load WebUntis homework: {str(exc)[:1000]}",
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+        finally:
+            await log_homework_command(message, error=error)
 
-        if len(tokens) == 2 and tokens[1].casefold() == "help":
+    @staticmethod
+    async def _send_homework_response(message, options):
+        if len(options) == 1 and options[0].casefold() == "help":
             embed = discord.Embed(description=(
                 "Defaults:\n"
                 f"`.hw class:all time:{HW_COMMAND_DEFAULT_WEEKS} past:false future:true`\n\n"
@@ -516,27 +593,20 @@ class UntisDiscordBot(commands.Bot):
             return
 
         try:
-            class_name, weeks, past, future = parse_homework_options(tokens[1:])
+            class_name, weeks, past, future = parse_homework_options(options)
         except ValueError as exc:
             await message.channel.send(
                 f"{exc} Use `.hw help` for available options.",
                 allowed_mentions=discord.AllowedMentions.none(),
             )
-            return
+            return str(exc)
 
-        try:
-            today, start, end, homework, names = await asyncio.to_thread(fetch_homework_range, weeks, past, future)
-            matches = [item for item in homework if homework_matches_class(item, class_name, names)]
-            matches.sort(key=lambda item: str(item.get("dueDate", "")))
-            label = "All subjects" if class_name.casefold() == "all" else (homework_subject(matches[0], names) if matches else class_name.title())
-            for embed in homework_embeds(matches, names, label, start, end):
-                await message.channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
-        except Exception as exc:
-            await log_event("Homework command failed", f"Error: `{type(exc).__name__}`", error=True)
-            await message.channel.send(
-                f"Could not load WebUntis homework: {str(exc)[:1000]}",
-                allowed_mentions=discord.AllowedMentions.none(),
-            )
+        today, start, end, homework, names = await asyncio.to_thread(fetch_homework_range, weeks, past, future)
+        matches = [item for item in homework if homework_matches_class(item, class_name, names)]
+        matches.sort(key=lambda item: str(item.get("dueDate", "")))
+        label = "All subjects" if class_name.casefold() == "all" else (homework_subject(matches[0], names) if matches else class_name.title())
+        for embed in homework_embeds(matches, names, label, start, end):
+            await message.channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
 
     async def show_restart_presence(self):
         await asyncio.sleep(5)
@@ -825,26 +895,22 @@ bot = UntisDiscordBot()
 
 @bot.tree.error
 async def command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
-    if interaction.command and interaction.command.name in {"announcements", "absences", "timetable-lookup"}:
-        print(f"School command failed: {type(error).__name__}", file=sys.stderr)
-        sender = interaction.followup.send if interaction.response.is_done() else interaction.response.send_message
-        await sender(embed=discord.Embed(description="I couldn't load that from WebUntis. Try again in a moment.",
-                                         color=FAVICON_COLOR), ephemeral=True)
-        return
-    print(f"Slash command failed: {error}", file=sys.stderr)
-    await log_event("Slash command failed", f"Error: `{type(error).__name__}`", error=True)
-    message = f"That command failed: {str(error)[:1200]}"
-    if interaction.command and interaction.command.name in {"check", "status"}:
-        embed = discord.Embed(description=message, color=FAVICON_COLOR)
-        if interaction.response.is_done():
-            await interaction.followup.send(embed=embed, ephemeral=True)
+    name = interaction.command.name if interaction.command else None
+    sender = interaction.followup.send if interaction.response.is_done() else interaction.response.send_message
+    try:
+        if name in {"announcements", "absences", "timetable-lookup"}:
+            print(f"School command failed: {type(error).__name__}", file=sys.stderr)
+            await sender(embed=discord.Embed(description="I couldn't load that from WebUntis. Try again in a moment.",
+                                             color=FAVICON_COLOR), ephemeral=True)
         else:
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-        return
-    if interaction.response.is_done():
-        await interaction.followup.send(message)
-    else:
-        await interaction.response.send_message(message)
+            print(f"Slash command failed: {error}", file=sys.stderr)
+            message = f"That command failed: {str(error)[:1200]}"
+            if name in {"check", "status"}:
+                await sender(embed=discord.Embed(description=message, color=FAVICON_COLOR), ephemeral=True)
+            else:
+                await sender(message)
+    finally:
+        await log_slash_command(interaction, error=command_error_detail(error))
 
 
 async def get_snapshot(interaction):
@@ -938,6 +1004,7 @@ async def require_owner(interaction):
         return True
     embed = discord.Embed(description="Only the configured bot owner can use this command.", color=FAVICON_COLOR)
     await interaction.response.send_message(embed=embed, ephemeral=True)
+    await report_slash_failure(interaction, "Access denied. Bot owner only.")
     return False
 
 
@@ -954,6 +1021,7 @@ async def absences_command(interaction: discord.Interaction, days: app_commands.
     except school_info.SchoolInfoUnavailable as error:
         embed = discord.Embed(title="Absences", description=str(error), color=FAVICON_COLOR)
         await interaction.followup.send(embed=embed, ephemeral=True)
+        await report_slash_failure(interaction, command_error_detail(error))
         return
     absences.sort(key=lambda item: (
         str(item.get("startDate") or ""), str(item.get("startTime") or "").zfill(4),
@@ -981,6 +1049,7 @@ async def timetable_lookup_command(interaction: discord.Interaction, student: st
     except school_info.SchoolInfoUnavailable as error:
         embed = discord.Embed(title="Timetable lookup", description=str(error), color=FAVICON_COLOR)
         await interaction.followup.send(embed=embed, ephemeral=True)
+        await report_slash_failure(interaction, command_error_detail(error))
         return
     filename = "webuntis-timetable.png"
     embed = discord.Embed(title=f"Timetable · {label}"[:256], color=FAVICON_COLOR)
@@ -1007,11 +1076,13 @@ async def status_command(interaction: discord.Interaction):
 async def restart_command(interaction: discord.Interaction):
     if interaction.user.id != BOT_OWNER_ID:
         await interaction.response.send_message("You can't use this command because you don't own this bot.", ephemeral=True)
+        await report_slash_failure(interaction, "Access denied. Bot owner only.")
         return
 
     await interaction.response.send_message("Restarting the bot now.", ephemeral=True)
     await bot.change_presence(activity=discord.Game(name="Restarting.."))
     await asyncio.sleep(1)
+    await log_slash_command(interaction)
     await bot.close()
     os.execv(sys.executable, [sys.executable, *sys.argv])
 
@@ -1026,6 +1097,7 @@ async def check_command(interaction: discord.Interaction, length: app_commands.C
     await interaction.response.defer(thinking=True, ephemeral=True)
     selected_length = length.value if length else "normal"
     range_label = "last month through the next 5 months" if selected_length == "full" else "the next 3 weeks"
+    failure = None
     try:
         result = await bot.poll_once(notify=True, length=selected_length)
         if result["initial"]:
@@ -1036,9 +1108,11 @@ async def check_command(interaction: discord.Interaction, length: app_commands.C
             message = f"Checked the {range_label} window; nothing has changed."
     except Exception as exc:
         bot.last_error = str(exc)
-        await log_event("Manual check failed", f"Error: `{type(exc).__name__}`", error=True)
+        failure = command_error_detail(exc)
         message = f"Check failed: {str(exc)[:1500]}"
     await interaction.followup.send(embed=discord.Embed(description=message, color=FAVICON_COLOR), ephemeral=True)
+    if failure is not None:
+        await report_slash_failure(interaction, failure)
 
 
 def main():

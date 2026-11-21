@@ -110,7 +110,7 @@ To try the iCal watcher's simulated data, run `python3 bot.py --demo`. For a rea
 
 Copy [display_names.example.json](display_names.example.json) to `display_names.json` to customize subject, teacher and room labels. Keep mappings private if they identify people.
 
-Set `WEBUNTIS_LOG_WEBHOOK_URL` in `.env` to send summaries to a separate Discord webhook. Logs record startup, detected changes, reminders and failures. They also record command usage, including the user, channel and `.hw` options. They omit timetable and homework details. The process environment variable takes precedence over `.env`. A failed log delivery is printed locally and does not stop the bot.
+Set `WEBUNTIS_LOG_WEBHOOK_URL` in `.env` to send summaries to a separate Discord webhook. Logs record startup, detected changes, reminders and command outcomes. Each command entry includes the caller's display name, username, and ID, plus the server and channel when available. Command choices appear directly, and typed options, including student names and `.hw` arguments, appear behind Discord spoilers. Anyone who can read the log can reveal those values. The process environment variable takes precedence over `.env`. A failed log delivery is printed locally and does not stop the bot.
 
 Set `WEBUNTIS_ANNOUNCEMENT_CHANNEL_ID` in `.env` or the process environment to post new public school announcements in that Discord channel. The bot checks every five minutes and remembers which announcements it has posted across restarts. `/announcements` reads the same feed without posting to the channel.
 
