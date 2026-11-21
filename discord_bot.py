@@ -21,11 +21,14 @@ from discord import app_commands
 from discord.ext import commands
 
 import legacy_bot as untis
+import school_info
 
 ROOT = Path(__file__).resolve().parent
 PLAN_STATE = ROOT / "plan_state.json"
 CHANNEL_STATE = ROOT / "discord_channel.json"
 REMINDER_STATE = ROOT / "reminder_state.json"
+ANNOUNCEMENT_STATE = ROOT / "announcement_state.json"
+ANNOUNCEMENT_CHANNEL_SETTING = "WEBUNTIS_ANNOUNCEMENT_CHANNEL_ID"
 POLL_SECONDS = 900
 FAST_POLL_SECONDS = 300
 LOOKAHEAD_DAYS = 21
@@ -80,20 +83,28 @@ def save_json(path, value):
     temp_path.replace(path)
 
 
-def webuntis_connection():
-    config = untis.load_config() or {}
+def webuntis_opener(config):
     prefix = config.get("WEBUNTIS_SUBDOMAIN", "").strip()
     school = config.get("WEBUNTIS_SCHOOL", "").strip()
-    username = config.get("WEBUNTIS_USERNAME", "").strip()
-    password = config.get("WEBUNTIS_PASSWORD", "")
-    if not all((prefix, school, username, password)):
+    if not (prefix and school):
         raise RuntimeError("WebUntis settings are missing from .env. Run legacy_bot.py --setup first.")
 
-    endpoint = f"https://{prefix}.webuntis.com/WebUntis/jsonrpc.do?{urllib.parse.urlencode({'school': school})}"
+    base_url = f"https://{prefix}.webuntis.com/WebUntis/"
+    query = urllib.parse.urlencode({"school": school})
     opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
-    preauth_url = f"https://{prefix}.webuntis.com/WebUntis/?{urllib.parse.urlencode({'school': school})}"
-    with opener.open(preauth_url, timeout=25) as response:
-        response.read()
+    with opener.open(f"{base_url}?{query}", timeout=25):
+        pass
+    return prefix, base_url, query, opener
+
+
+def webuntis_connection():
+    config = untis.load_config() or {}
+    username = config.get("WEBUNTIS_USERNAME", "").strip()
+    password = config.get("WEBUNTIS_PASSWORD", "")
+    if not (username and password):
+        raise RuntimeError("WebUntis settings are missing from .env. Run legacy_bot.py --setup first.")
+    prefix, base_url, query, opener = webuntis_opener(config)
+    endpoint = f"{base_url}jsonrpc.do?{query}"
     auth = untis.rpc(opener, endpoint, "authenticate", {
         "user": username, "password": password, "client": "PersonalTimetableDiscordBot"
     })
@@ -110,19 +121,9 @@ def fetch_snapshot(full=False):
     plan_end = exam_end if full else today + timedelta(days=LOOKAHEAD_DAYS)
     week_start = today - timedelta(days=today.weekday())
     query_start = add_months(today, -1) if full else week_start
-    options = {
-        "id": auth["personId"],
-        "element": {"id": auth["personId"], "type": auth.get("personType", 5)},
-        "startDate": untis.normal_date(query_start),
-        "endDate": untis.normal_date(end),
-        "showLsText": True,
-        "showStudentgroup": True,
-        "showLsNumber": True,
-        "showSubstText": True,
-        "showInfo": True,
-        "showBooking": True,
-    }
-    timetable = untis.records_from(untis.rpc(opener, endpoint, "getTimetable", {"options": options}))
+    timetable = school_info.fetch_timetable(
+        opener, endpoint, auth["personId"], auth.get("personType", 5), query_start, end,
+    )
     homework, exams = untis.fetch_plan_markers(prefix, query_start, exam_end, opener)
     homework = [item for item in homework
                 if str(item.get("dueDate", "")) <= untis.normal_date(plan_end)]
@@ -392,6 +393,49 @@ def split_message(text, limit=1850):
     return chunks
 
 
+def fetch_announcements():
+    _prefix, base_url, _query, opener = webuntis_opener(untis.load_config() or {})
+    return school_info.web_records(opener, base_url, "public/news/newsWidgetData", {
+        "date": untis.normal_date(untis.school_today()),
+    }, "messagesOfDay")
+
+
+def announcement_embeds(announcement):
+    subject = school_info.announcement_text(announcement.get("subject")) or "School announcement"
+    body = school_info.announcement_text(announcement.get("text"))
+    safe_body = discord.utils.escape_markdown(body)
+    pages = split_message(safe_body, limit=3500) or [None]
+    return [discord.Embed(title=discord.utils.escape_markdown(subject)[:256], description=page,
+                          color=FAVICON_COLOR).set_footer(text="WebUntis announcement")
+            for page in pages]
+
+
+def fetch_absences(start, end):
+    prefix, _endpoint, opener, auth = webuntis_connection()
+    return school_info.personal_absences(opener, f"https://{prefix}.webuntis.com/WebUntis/", auth, start, end)
+
+
+def absence_description(item):
+    start_date = untis.date_label(item.get("startDate"))
+    end_date = untis.date_label(item.get("endDate"))
+    start = " ".join(filter(None, (start_date, untis.time_label(item.get("startTime")))))
+    end = " ".join(filter(None, (end_date, untis.time_label(item.get("endTime")))))
+    when = f"{start} to {end}" if start and end and start != end else start or end or "Date unavailable"
+    reason = str(item.get("reason") or "No reason listed")
+    status = item.get("excuseStatus")
+    if not status and item.get("isExcused") is not None:
+        status = "Excused" if item["isExcused"] else "Not excused"
+    details = " · ".join(discord.utils.escape_markdown(str(value)) for value in (reason, status) if value)
+    return f"**{discord.utils.escape_markdown(when)}**\n{details}"
+
+
+def render_timetable_lookup(student, class_name, monday):
+    _prefix, endpoint, opener, _auth = webuntis_connection()
+    label, periods, used_class = school_info.timetable_lookup(opener, endpoint, student, class_name, monday)
+    names = untis.load_entity_names(opener, endpoint)
+    return label, untis.timetable_png(periods, monday, names), used_class
+
+
 class UntisDiscordBot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.none()
@@ -435,6 +479,7 @@ class UntisDiscordBot(commands.Bot):
             print(f"Due-tomorrow homework/exam reminders scheduled daily at 18:00 {SCHOOL_TZ.key}.")
             self.poll_task = asyncio.create_task(self.poll_forever())
             self.reminder_task = asyncio.create_task(self.reminder_forever())
+            self.announcement_task = asyncio.create_task(self.announcements_forever())
             asyncio.create_task(self.show_restart_presence())
             await log_event("WebUntis bot started", "Connected to Discord and started polling.")
 
@@ -684,6 +729,43 @@ class UntisDiscordBot(commands.Bot):
                 await log_event("WebUntis check failed", f"Error: `{type(exc).__name__}`", error=True)
             await asyncio.sleep(FAST_POLL_SECONDS if fast_window else POLL_SECONDS)
 
+    async def post_announcements(self, channel_id):
+        announcements = await asyncio.to_thread(fetch_announcements)
+        if not announcements:
+            return
+        try:
+            sent = set(json.loads(ANNOUNCEMENT_STATE.read_text("utf-8")))
+        except FileNotFoundError:
+            sent = set()
+
+        for announcement in announcements:
+            embeds = announcement_embeds(announcement)
+            identity = json.dumps([
+                channel_id, announcement.get("id"), [embed.to_dict() for embed in embeds],
+            ], sort_keys=True)
+            fingerprint = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+            pending = [(f"{fingerprint}:{index}", embed) for index, embed in enumerate(embeds)
+                       if f"{fingerprint}:{index}" not in sent]
+            if not pending:
+                continue
+            channel = self.get_channel(channel_id) or await self.fetch_channel(channel_id)
+            for key, embed in pending:
+                await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+                sent.add(key)
+                save_json(ANNOUNCEMENT_STATE, sorted(sent))
+
+    async def announcements_forever(self):
+        await self.wait_until_ready()
+        while not self.is_closed():
+            try:
+                config = untis.load_config() or {}
+                channel_id = os.environ.get(ANNOUNCEMENT_CHANNEL_SETTING) or config.get(ANNOUNCEMENT_CHANNEL_SETTING)
+                if channel_id:
+                    await self.post_announcements(int(channel_id))
+            except Exception as error:
+                print(f"School announcement check failed: {type(error).__name__}", file=sys.stderr)
+            await asyncio.sleep(FAST_POLL_SECONDS)
+
     async def reminder_forever(self):
         await self.wait_until_ready()
         while not self.is_closed():
@@ -743,6 +825,12 @@ bot = UntisDiscordBot()
 
 @bot.tree.error
 async def command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    if interaction.command and interaction.command.name in {"announcements", "absences", "timetable-lookup"}:
+        print(f"School command failed: {type(error).__name__}", file=sys.stderr)
+        sender = interaction.followup.send if interaction.response.is_done() else interaction.response.send_message
+        await sender(embed=discord.Embed(description="I couldn't load that from WebUntis. Try again in a moment.",
+                                         color=FAVICON_COLOR), ephemeral=True)
+        return
     print(f"Slash command failed: {error}", file=sys.stderr)
     await log_event("Slash command failed", f"Error: `{type(error).__name__}`", error=True)
     message = f"That command failed: {str(error)[:1200]}"
@@ -830,6 +918,76 @@ async def exams_command(interaction: discord.Interaction):
             await interaction.response.send_message(embed=embed)
         else:
             await interaction.followup.send(embed=embed)
+
+
+@bot.tree.command(name="announcements", description="Read today's public WebUntis school announcements privately")
+async def announcements_command(interaction: discord.Interaction):
+    await interaction.response.defer(thinking=True, ephemeral=True)
+    announcements = await asyncio.to_thread(fetch_announcements)
+    if not announcements:
+        embed = discord.Embed(title="School announcements", description="No announcements today.", color=FAVICON_COLOR)
+        await interaction.followup.send(embed=embed, ephemeral=True)
+        return
+    for announcement in announcements:
+        for embed in announcement_embeds(announcement):
+            await interaction.followup.send(embed=embed, ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+
+
+async def require_owner(interaction):
+    if interaction.user.id == BOT_OWNER_ID:
+        return True
+    embed = discord.Embed(description="Only the configured bot owner can use this command.", color=FAVICON_COLOR)
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+    return False
+
+
+@bot.tree.command(name="absences", description="View your own WebUntis absences privately")
+@app_commands.describe(days="Number of days to look back, including today. Defaults to 30.")
+async def absences_command(interaction: discord.Interaction, days: app_commands.Range[int, 1, 366] = 30):
+    if not await require_owner(interaction):
+        return
+    await interaction.response.defer(thinking=True, ephemeral=True)
+    end = untis.school_today()
+    start = end - timedelta(days=days - 1)
+    try:
+        absences = await asyncio.to_thread(fetch_absences, start, end)
+    except school_info.SchoolInfoUnavailable as error:
+        embed = discord.Embed(title="Absences", description=str(error), color=FAVICON_COLOR)
+        await interaction.followup.send(embed=embed, ephemeral=True)
+        return
+    absences.sort(key=lambda item: (
+        str(item.get("startDate") or ""), str(item.get("startTime") or "").zfill(4),
+    ), reverse=True)
+    description = "\n\n".join(absence_description(item) for item in absences) or "No absences in this date range."
+    for page in split_message(description, limit=3500):
+        embed = discord.Embed(title="Absences", description=page, color=FAVICON_COLOR)
+        embed.set_footer(text=f"{untis.date_label(untis.normal_date(start))} to {untis.date_label(untis.normal_date(end))}")
+        await interaction.followup.send(embed=embed, ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+
+
+@bot.tree.command(name="timetable-lookup", description="Privately look up a student or class timetable in WebUntis")
+@app_commands.describe(student="Student's full name as shown in WebUntis",
+                       class_name="Exact class name, also used if the student timetable is unavailable",
+                       week="Weeks ahead, where 0 is this week")
+async def timetable_lookup_command(interaction: discord.Interaction, student: str | None = None,
+                                   class_name: str | None = None, week: app_commands.Range[int, 0, 4] = 0):
+    if not await require_owner(interaction):
+        return
+    await interaction.response.defer(thinking=True, ephemeral=True)
+    today = untis.school_today()
+    monday = today - timedelta(days=today.weekday()) + timedelta(weeks=week)
+    try:
+        label, image, used_class = await asyncio.to_thread(render_timetable_lookup, student, class_name, monday)
+    except school_info.SchoolInfoUnavailable as error:
+        embed = discord.Embed(title="Timetable lookup", description=str(error), color=FAVICON_COLOR)
+        await interaction.followup.send(embed=embed, ephemeral=True)
+        return
+    filename = "webuntis-timetable.png"
+    embed = discord.Embed(title=f"Timetable · {label}"[:256], color=FAVICON_COLOR)
+    if used_class:
+        embed.description = "The student timetable was unavailable. This is the class timetable."
+    embed.set_image(url=f"attachment://{filename}")
+    await interaction.followup.send(embed=embed, file=discord.File(BytesIO(image), filename=filename), ephemeral=True)
 
 
 @bot.tree.command(name="status", description="Check when the bot last reached WebUntis")

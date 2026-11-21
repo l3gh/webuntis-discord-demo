@@ -59,7 +59,7 @@ def load_config():
 
 
 def save_config(config):
-    keys = ("WEBUNTIS_SUBDOMAIN", "WEBUNTIS_SCHOOL", "WEBUNTIS_USERNAME", "WEBUNTIS_PASSWORD", "DISCORD_WEBHOOK_URL", "DISCORD_BOT_TOKEN", "WEBUNTIS_LOG_WEBHOOK_URL")
+    keys = ("WEBUNTIS_SUBDOMAIN", "WEBUNTIS_SCHOOL", "WEBUNTIS_USERNAME", "WEBUNTIS_PASSWORD", "DISCORD_WEBHOOK_URL", "DISCORD_BOT_TOKEN", "WEBUNTIS_LOG_WEBHOOK_URL", "WEBUNTIS_ANNOUNCEMENT_CHANNEL_ID")
     content = "# Private settings for legacy_bot.py\n" + "".join(f"{key}={json.dumps(config.get(key, ''), ensure_ascii=False)}\n" for key in keys)
     fd = os.open(ENV_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
@@ -79,10 +79,15 @@ def setup_config():
     hook = ("" if hook_input == "-" else hook_input) if hook_input else existing.get("DISCORD_WEBHOOK_URL", "")
     if not prefix or not school or not username or not password:
         raise ValueError("school subdomain, school name, username, and password are required")
-    save_config({"WEBUNTIS_SUBDOMAIN": prefix, "WEBUNTIS_SCHOOL": school, "WEBUNTIS_USERNAME": username,
-                 "WEBUNTIS_PASSWORD": password, "DISCORD_WEBHOOK_URL": hook,
-                 "DISCORD_BOT_TOKEN": existing.get("DISCORD_BOT_TOKEN", "")})
+    save_config({**existing, "WEBUNTIS_SUBDOMAIN": prefix, "WEBUNTIS_SCHOOL": school,
+                 "WEBUNTIS_USERNAME": username, "WEBUNTIS_PASSWORD": password, "DISCORD_WEBHOOK_URL": hook})
     print(f"Saved settings to {ENV_FILE} with owner-only permissions.")
+
+
+class WebUntisApiError(RuntimeError):
+    def __init__(self, code, message):
+        super().__init__(f"WebUntis API error {code}: {message}")
+        self.code = str(code)
 
 
 def rpc(opener, url, method, params):
@@ -101,7 +106,7 @@ def rpc(opener, url, method, params):
         raise RuntimeError(f"Could not reach WebUntis: {exc}") from None
     if "error" in result:
         err = result["error"]
-        raise RuntimeError(f"WebUntis API error {err.get('code', '')}: {err.get('message', 'unknown error')}")
+        raise WebUntisApiError(err.get("code", ""), err.get("message", "unknown error"))
     return result.get("result")
 
 
