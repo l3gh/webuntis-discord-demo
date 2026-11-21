@@ -66,11 +66,16 @@ Timetable alerts name the change, such as a cancellation, teacher substitution, 
 | `/timetable` | This week's timetable image; choose a later week or a light/dark theme. |
 | `/homework` | A homework overview image, with a light/dark theme option. |
 | `/exams` | Upcoming exams from the linked account. |
+| `/announcements` | Today's public school announcements, visible only to you. |
+| `/absences` | The linked student's absences. Owner-only and private. Defaults to the last 30 days. |
+| `/timetable-lookup` | Look up a student by full name or a class by its WebUntis name. Owner-only and private. |
 | `.hw` | Homework due from today through the next four weeks. |
 | `.hw help` | Options for subject and date filters. |
 | `/status` | Last successful check and latest error, visible only to you. |
 | `/check` | Check now and post detected changes in this channel; the command acknowledgement is visible only to you. |
 | `/restart` | Restart the bot; restricted to the configured owner. |
+
+For `/timetable-lookup`, supply `class_name` to look up a class directly or alongside `student` as a fallback. Individual student lookup requires the linked account to have permission to list students and view their timetables. Other Discord users do not need to provide a WebUntis login.
 
 ### Filter homework
 
@@ -106,6 +111,8 @@ To try the iCal watcher's simulated data, run `python3 bot.py --demo`. For a rea
 Copy [display_names.example.json](display_names.example.json) to `display_names.json` to customize subject, teacher and room labels. Keep mappings private if they identify people.
 
 Set `WEBUNTIS_LOG_WEBHOOK_URL` in `.env` to send summaries to a separate Discord webhook. Logs record startup, detected changes, reminders and failures. They also record command usage, including the user, channel and `.hw` options. They omit timetable and homework details. The process environment variable takes precedence over `.env`. A failed log delivery is printed locally and does not stop the bot.
+
+Set `WEBUNTIS_ANNOUNCEMENT_CHANNEL_ID` in `.env` or the process environment to post new public school announcements in that Discord channel. The bot checks every five minutes and remembers which announcements it has posted across restarts. `/announcements` reads the same feed without posting to the channel.
 
 ## Limitations and privacy
 

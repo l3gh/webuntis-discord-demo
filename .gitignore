@@ -8,6 +8,7 @@ state.json
 legacy_state.json
 plan_state.json
 reminder_state.json
+announcement_state.json
 watcher_status.json
 discord_channel.json
 display_names.json
