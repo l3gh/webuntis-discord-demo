@@ -379,7 +379,7 @@ def _period_key(record):
 
 
 def timetable_png(entries, monday, entity_names=None, range_start=None, range_end=None,
-                  homework_items=None, exam_items=None, homework_periods=None, mode="light"):
+                  homework_items=None, exam_items=None, homework_periods=None, mode="light", *, now=None):
     """Render one Monday-Friday timetable as a clean, Untis-inspired PNG."""
     try:
         from PIL import Image, ImageDraw, ImageFont
@@ -393,6 +393,7 @@ def timetable_png(entries, monday, entity_names=None, range_start=None, range_en
         "muted": "#94a3b3" if dark else "#758493",
         "day": "#a1afbe" if dark else "#536575",
         "grid": "#26303a" if dark else "#cbd3da",
+        "current_time": "#ff784f" if dark else "#bc421b",
         "column": "#202a34" if dark else "#d7dde2",
         "break": "#19222c" if dark else "#e3e9ed",
         "break_text": "#8795a5" if dark else "#72818d",
@@ -536,9 +537,20 @@ def timetable_png(entries, monday, entity_names=None, range_start=None, range_en
             draw.rounded_rectangle((marker_x, 148, marker_x + marker_w, 172), radius=7, fill=palette["exam_badge_bg"])
             draw.text((marker_x + 9, 153), label, font=marker_font, fill=palette["exam_badge_text"])
     y_for = lambda minute: top + int((minute - start_minute) * scale)
+    current_y = None
+    if now is not None and monday <= now.date() < week_end:
+        today = now.date()
+        today_blocks = by_day.get(today, []) + exams_by_day.get(today, [])
+        minute = now.hour * 60 + now.minute
+        if today_blocks:
+            first_start = min(start for start, _, _ in today_blocks)
+            last_end = max(end for _, end, _ in today_blocks)
+            if max(start_minute, first_start) <= minute < last_end:
+                current_y = y_for(minute)
     for minute in range((start_minute // 60) * 60, end_minute + 1, 60):
         y = y_for(minute)
-        draw.text((18, y - 8), f"{minute // 60:02d}:{minute % 60:02d}", font=time_font, fill=palette["footer"])
+        if current_y is None or abs(y - current_y) >= 14:
+            draw.text((18, y - 8), f"{minute // 60:02d}:{minute % 60:02d}", font=time_font, fill=palette["footer"])
         draw.line((left, y, width - 15, y), fill=palette["grid"], width=1)
     for idx in range(5):
         x0 = left + 12 + idx * col_w
@@ -646,6 +658,12 @@ def timetable_png(entries, monday, entity_names=None, range_start=None, range_en
             draw.text((x0 + 17, ey0 + 30),
                       f"{exam_start // 60:02d}:{exam_start % 60:02d}–{exam_end // 60:02d}:{exam_end % 60:02d}",
                       font=small_font, fill=palette["exam_text"])
+    if current_y is not None:
+        ink = palette["current_time"]
+        today_x = left + 12 + (today - monday).days * col_w
+        draw.line((left, current_y, width - 15, current_y), fill=ink)
+        draw.line((today_x, current_y, today_x + col_w, current_y), fill=ink, width=4)
+        draw.text((18, current_y - 8), now.strftime("%H:%M"), font=time_font, fill=ink)
     draw.text((left, height - 26), f"{sum(len(v) for v in by_day.values())} lessons  ·  WebUntis", font=small_font, fill=palette["footer"])
     output = BytesIO()
     img.save(output, format="PNG", optimize=True)
