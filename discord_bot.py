@@ -944,7 +944,7 @@ async def timetable_command(
     image = await asyncio.to_thread(
         untis.timetable_png, snapshot["timetable"], monday, snapshot["entity_names"],
         today, snapshot["end"], snapshot["homework"], snapshot["exams"], None,
-        mode.value if mode else "light",
+        mode.value if mode else "light", now=datetime.now(SCHOOL_TZ),
     )
     file = discord.File(BytesIO(image), filename=f"webuntis-week-{mode.value if mode else 'light'}.png")
     if interaction.response.is_done():
